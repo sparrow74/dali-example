@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" package="com.samsung.dali-example" version="0.0.1" api-version="2.4" install-location="internal-only">
+<!-- NOTE THAT ALL LEADING WHITESPACE IN THIS FILE MUST BE TABS, NOT SPACES. APPS WITH LEADING SPACES WILL SILENTLY FAIL TO RUN ON A TARGET DEVICE. -->
+	<label>Dali Example</label>
+	<author email="adeel.kazmi@samsung.com" href="www.samsung.com">Adeel Kazmi</author>
+	<description>DALi Example</description>
+
+	<ui-application appid="com.samsung.dali-example" exec="/usr/apps/com.samsung.dali-example/bin/dali-example" nodisplay="false" multiple="false" type="c++app" taskmanage="true">
+		<icon>/usr/share/icons/com.samsung.dali-example.png</icon>
+		<label>DALi Example</label>
+	</ui-application>
+
+	<privileges>
+		<privilege>http://tizen.org/privilege/mediastorage</privilege>
+		<privilege>http://tizen.org/privilege/externalstorage</privilege>
+		<privilege>http://tizen.org/privilege/externalstorage.appdata</privilege>
+		<privilege>http://tizen.org/privilege/unlimitedstorage</privilege>
+		<privilege>http://tizen.org/privilege/filesystem.write</privilege>
+		<privilege>http://tizen.org/privilege/filesystem.read</privilege>
+		<privilege>http://tizen.org/privilege/download</privilege>
+		<privilege>http://tizen.org/privilege/internet</privilege>
+		<privilege>http://tizen.org/privilege/network.get</privilege>
+		<privilege>http://tizen.org/privilege/network.profile</privilege>
+		<privilege>http://tizen.org/privilege/network.set</privilege>
+	</privileges>
+</manifest>
