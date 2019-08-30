@@ -17,9 +17,9 @@
 A simple DALi example with resources and a style.
 The build configuration allows using these styles appropriately in the source code.
 This repo should be modified locally to incorporate the application you wish to debug.
-Add any header or source files to the 'src' directory.
-Add any resources required to the 'resources/images' directory.
-Add any styles (.json) files required to the 'resources/style' directory.
+ * Add any header or source files to the 'src' directory.
+ * Add any resources required to the 'resources/images' directory.
+ * Add any styles (.json) files required to the 'resources/style' directory.
 
 # Build Instructions
 
