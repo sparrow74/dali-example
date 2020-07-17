@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Samsung Electronics Co., Ltd.
+ * Copyright (c) 2020 Samsung Electronics Co., Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ private:
   {
     // Get a handle to the main window & respond to key events
     Window window = application.GetWindow();
-    DevelWindow::KeyEventSignal( window ).Connect( this, &Example::OnKeyEvent );
+    window.KeyEventSignal().Connect( this, &Example::OnKeyEvent );
 
     // Create the background using the style sheet
     Control control = Control::New();
@@ -60,8 +60,8 @@ private:
 
     // Create an ImageView and add it to the window
     ImageView image = ImageView::New( IMAGE_PATH );
-    image.SetAnchorPoint( AnchorPoint::CENTER );
-    image.SetParentOrigin( Vector3( 0.5f,  0.25f, 0.5f ) );
+    image.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::CENTER );
+    image.SetProperty( Actor::Property::PARENT_ORIGIN, Vector3( 0.5f,  0.25f, 0.5f ) );
     window.Add( image );
 
     // Create an ImageView with properties set from the style sheet

@@ -49,9 +49,9 @@ ENDFOREACH(FILE)
 CONFIGURE_FILE( resources-location.in resources-location.cpp )
 
 # Dependency Checks
-SET(PKG_LIST dali-core
-             dali-adaptor
-             dali-toolkit)
+SET(PKG_LIST dali2-core
+             dali2-adaptor
+             dali2-toolkit)
 
 INCLUDE(FindPkgConfig)
 PKG_CHECK_MODULES(REQUIRED_PKGS REQUIRED ${PKG_LIST})

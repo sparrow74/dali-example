@@ -14,9 +14,9 @@ Requires(postun): /sbin/ldconfig
 
 BuildRequires:  cmake
 BuildRequires:  pkgconfig
-BuildRequires:  pkgconfig(dali-core)
-BuildRequires:  pkgconfig(dali-adaptor)
-BuildRequires:  pkgconfig(dali-toolkit)
+BuildRequires:  pkgconfig(dali2-core)
+BuildRequires:  pkgconfig(dali2-adaptor)
+BuildRequires:  pkgconfig(dali2-toolkit)
 BuildRequires:  pkgconfig(libtzplatform-config)
 
 %description
