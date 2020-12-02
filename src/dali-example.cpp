@@ -18,6 +18,7 @@
 // EXTERNAL INCLUDES
 #include <dali-toolkit/dali-toolkit.h>
 #include <dali/devel-api/adaptor-framework/window-devel.h>
+#include <dali/integration-api/debug.h>
 
 using namespace Dali;
 using namespace Dali::Toolkit;
@@ -68,6 +69,23 @@ private:
     ImageView styledImage = ImageView::New();
     styledImage.SetStyleName( IMAGE_STYLE_NAME );
     window.Add( styledImage );
+
+    mSecondWindow = Window::New(PositionSize(0, 0, 480, 800), "", false);
+
+    mSecondWindow.SetTransparency( true );
+    mSecondWindow.SetBackgroundColor( Vector4( 0.9, 0.3, 0.3, 0.5) );
+
+    Dali::Window::WindowPosition secondWindowPosition = Dali::Window::WindowPosition( 0, 0 );
+    mSecondWindow.SetPosition(secondWindowPosition);
+
+    mTextLabel2 = TextLabel::New("Second Window");
+    mTextLabel2.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::TOP_LEFT );
+    mTextLabel2.SetProperty( Actor::Property::NAME, "Second Window");
+
+    mSecondWindow.Add( mTextLabel2 );
+
+    //mSecondWindow.Hide();
+    mSecondWindow.Show();
   }
 
   ///< Called when a key is pressed, we'll use this to quit
@@ -80,10 +98,24 @@ private:
         mApplication.Quit();
       }
     }
+    else if (event.GetKeyName()  == "1")
+    {
+      DALI_LOG_ERROR("OnKeyEvent()!!! pressed 1 button(100x100)\n");
+      Window window = mApplication.GetWindow();
+      DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 100, 100 ));
+    }
+    else if (event.GetKeyName()  == "2")
+    {
+      DALI_LOG_ERROR("OnKeyEvent()!!! pressed 2 button(200x200)\n");
+      Window window = mApplication.GetWindow();
+      DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 200, 200 ));
+    }
   }
 
 private:
   Application&  mApplication;
+  Dali::Window mSecondWindow;
+  TextLabel mTextLabel2;
 };
 
 int DALI_EXPORT_API main( int argc, char **argv )
