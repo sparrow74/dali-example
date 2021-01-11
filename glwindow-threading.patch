@@ -1,0 +1,195 @@
+diff --git dali/internal/window-system/common/gl-window-impl.cpp dali/internal/window-system/common/gl-window-impl.cpp
+index 7fff6c8..e69bf6e 100644
+--- dali/internal/window-system/common/gl-window-impl.cpp
++++ dali/internal/window-system/common/gl-window-impl.cpp
+@@ -113,8 +113,6 @@ GlWindow::~GlWindow()
+   {
+     mGlWindowRenderThread->Stop();
+     mGlWindowRenderThread->Join();
+-    delete mGlWindowRenderThread;
+-    mGlWindowRenderThread = nullptr;
+   }
+ 
+   if( mIsGraphicsInitialize )
+@@ -423,6 +421,11 @@ void GlWindow::OnIconifyChanged( bool iconified )
+       mEventHandler->Pause();
+     }
+ 
++    if( mGlWindowRenderThread )
++    {
++      mGlWindowRenderThread->Pause();
++    }
++
+     DALI_LOG_RELEASE_INFO( "Window (%p), WinId (%d), Iconified: visible = %d\n", this, mNativeWindowId, mVisible );
+   }
+   else
+@@ -440,6 +443,11 @@ void GlWindow::OnIconifyChanged( bool iconified )
+       mEventHandler->Resume();
+     }
+ 
++    if( mGlWindowRenderThread )
++    {
++      mGlWindowRenderThread->Resume();
++    }
++
+     DALI_LOG_RELEASE_INFO( "Window (%p), WinId (%d), Deiconified: visible = %d\n", this, mNativeWindowId, mVisible );
+   }
+ }
+@@ -801,7 +809,7 @@ void GlWindow::InitializeGraphics()
+     mDisplayConnection->Initialize();
+ 
+     // Create Render Thread
+-    mGlWindowRenderThread = new GlWindowRenderThread( mPositionSize, mColorDepth );
++    mGlWindowRenderThread = std::unique_ptr< Dali::Internal::Adaptor::GlWindowRenderThread >( new GlWindowRenderThread( mPositionSize, mColorDepth ) );
+     if( !mGlWindowRenderThread )
+     {
+       DALI_LOG_ERROR("Fail to create GlWindow Render Thread!!!!\n");
+diff --git dali/internal/window-system/common/gl-window-impl.h dali/internal/window-system/common/gl-window-impl.h
+index 1b43ef7..ca2249f 100644
+--- dali/internal/window-system/common/gl-window-impl.h
++++ dali/internal/window-system/common/gl-window-impl.h
+@@ -408,7 +408,7 @@ private:
+   bool                                        mStencil:1;
+   int                                         mMSAA;
+ 
+-  GlWindowRenderThread*                       mGlWindowRenderThread;
++  std::unique_ptr< GlWindowRenderThread >     mGlWindowRenderThread;
+   Dali::GlWindow::RenderingMode               mRenderingMode;
+ };
+ 
+diff --git dali/internal/window-system/common/gl-window-render-thread.cpp dali/internal/window-system/common/gl-window-render-thread.cpp
+index f1c1a8c..cd916ae 100644
+--- dali/internal/window-system/common/gl-window-render-thread.cpp
++++ dali/internal/window-system/common/gl-window-render-thread.cpp
+@@ -33,10 +33,7 @@ namespace Adaptor
+ namespace
+ {
+ 
+-const unsigned int MILLISECONDS_PER_SECOND( 1e+3 );
+-const float        NANOSECONDS_TO_SECOND( 1e-9f );
+ const unsigned int NANOSECONDS_PER_SECOND( 1e+9 );
+-const unsigned int NANOSECONDS_PER_MILLISECOND( 1e+6 );
+ 
+ // The following values will get calculated at compile time
+ const float        DEFAULT_FRAME_DURATION_IN_SECONDS( 1.0f / 60.0f );
+@@ -56,7 +53,6 @@ GlWindowRenderThread::GlWindowRenderThread( PositionSize positionSize, ColorDept
+   mEGLSurface( nullptr ),
+   mEGLContext( nullptr ),
+   mGLESVersion( 30 ), // Default GLES version 30
+-  mInitCallback( false ),
+   mDepth( false ),
+   mStencil( false ),
+   mIsEGLInitialize( false ),
+@@ -98,13 +94,14 @@ void GlWindowRenderThread::Pause()
+ {
+   ConditionalWait::ScopedLock lock( mRenderThreadWaitCondition );
+   mPauseRenderThread = 1;
+-  mRenderThreadWaitCondition.Notify( lock );
++  DALI_LOG_RELEASE_INFO( "GlWindowRenderThread::Pause()\n");
+ }
+ 
+ void GlWindowRenderThread::Resume()
+ {
+   ConditionalWait::ScopedLock lock( mRenderThreadWaitCondition );
+   mPauseRenderThread = 0;
++  DALI_LOG_RELEASE_INFO( "GlWindowRenderThread::Resume()\n");
+   mRenderThreadWaitCondition.Notify( lock );
+ }
+ 
+@@ -112,6 +109,7 @@ void GlWindowRenderThread::Stop()
+ {
+   ConditionalWait::ScopedLock lock( mRenderThreadWaitCondition );
+   mDestroyRenderThread = 1;
++  DALI_LOG_RELEASE_INFO( "GlWindowRenderThread::Stop()\n");
+   mRenderThreadWaitCondition.Notify( lock );
+ }
+ 
+@@ -122,15 +120,17 @@ void GlWindowRenderThread::RegisterGlCallback( CallbackBase* initCallback,
+   mGLInitCallback = std::unique_ptr< CallbackBase >(initCallback);
+   mGLRenderFrameCallback = std::unique_ptr< CallbackBase >( renderFrameCallback );
+   mGLTerminateCallback = std::unique_ptr< CallbackBase >( terminateCallback );
+-
+-  mInitCallback = false;
+ }
+ 
+ void GlWindowRenderThread::SetOnDemandRenderMode( bool onDemand )
+ {
+   ConditionalWait::ScopedLock lock( mRenderThreadWaitCondition );
+   mRenderingMode = static_cast<unsigned int>( onDemand );
+-  mRenderThreadWaitCondition.Notify( lock );
++  DALI_LOG_RELEASE_INFO( "GlWindowRenderThread::SetOnDemandRenderMode(): mRenderingMode: %d\n", mRenderingMode);
++  if( !onDemand )
++  {
++    mRenderThreadWaitCondition.Notify( lock );
++  }
+ }
+ 
+ void GlWindowRenderThread::RenderOnce()
+@@ -154,19 +154,11 @@ void GlWindowRenderThread::Run()
+ 
+   eglImpl.MakeContextCurrent( mEGLSurface, mEGLContext );
+ 
+-  if( !mInitCallback )
++  if( mGLInitCallback )
+   {
+-    if( mGLInitCallback )
+-    {
+       CallbackBase::Execute(*mGLInitCallback);
+-    }
+-    mInitCallback = true;
+   }
+ 
+-  // Update time
+-  uint64_t lastFrameTime;
+-  TimeService::GetNanoseconds( lastFrameTime );
+-
+   uint64_t timeToSleepUntil = 0;
+ 
+   while(RenderReady( timeToSleepUntil ))
+@@ -177,11 +169,11 @@ void GlWindowRenderThread::Run()
+     if( mGLRenderFrameCallback )
+     {
+       renderFrameResult = CallbackBase::ExecuteReturn<int>(*mGLRenderFrameCallback);
+-    }
+ 
+-    if( renderFrameResult )
+-    {
+-      eglImpl.SwapBuffers( mEGLSurface );
++      if( renderFrameResult )
++      {
++        eglImpl.SwapBuffers( mEGLSurface );
++      }
+     }
+     renderFrameResult = 0;
+ 
+@@ -269,10 +261,18 @@ void GlWindowRenderThread::InitializeGraphics( EglGraphics *eglGraphics )
+ bool GlWindowRenderThread::RenderReady( uint64_t& timeToSleepUntil )
+ {
+   ConditionalWait::ScopedLock updateLock( mRenderThreadWaitCondition );
++  DALI_LOG_RELEASE_INFO( "RenderReady(): mDestroyRenderThread: %d\n", mDestroyRenderThread );
++  DALI_LOG_RELEASE_INFO( "RenderReady(): mRenderingMode: %d\n", mRenderingMode );
++  DALI_LOG_RELEASE_INFO( "RenderReady(): mRequestRenderOnce: %d\n", mRequestRenderOnce );
++  DALI_LOG_RELEASE_INFO( "RenderReady(): mPauseRenderThread: %d\n", mPauseRenderThread );
+   while( ( !mDestroyRenderThread && mRenderingMode && !mRequestRenderOnce )
+          || mPauseRenderThread )
+   {
+     timeToSleepUntil = 0;
++    DALI_LOG_RELEASE_INFO( "RenderReady() WAIT: mDestroyRenderThread: %d\n", mDestroyRenderThread );
++    DALI_LOG_RELEASE_INFO( "RenderReady() WAIT: mRenderingMode: %d\n", mRenderingMode );
++    DALI_LOG_RELEASE_INFO( "RenderReady() WAIT: mRequestRenderOnce: %d\n", mRequestRenderOnce );
++    DALI_LOG_RELEASE_INFO( "RenderReady() WAIT: mPauseRenderThread: %d\n", mPauseRenderThread );
+     mRenderThreadWaitCondition.Wait( updateLock );
+   }
+ 
+diff --git dali/internal/window-system/common/gl-window-render-thread.h dali/internal/window-system/common/gl-window-render-thread.h
+index 9795b19..fc6c04f 100644
+--- dali/internal/window-system/common/gl-window-render-thread.h
++++ dali/internal/window-system/common/gl-window-render-thread.h
+@@ -179,7 +179,6 @@ private:
+   EGLSurface                                  mEGLSurface;
+   EGLContext                                  mEGLContext;
+   int                                         mGLESVersion;
+-  bool                                        mInitCallback:1;
+   bool                                        mDepth:1;
+   bool                                        mStencil:1;
+   bool                                        mIsEGLInitialize:1;
