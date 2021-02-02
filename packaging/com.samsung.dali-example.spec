@@ -19,6 +19,7 @@ BuildRequires:  pkgconfig(dali2-adaptor)
 BuildRequires:  pkgconfig(dali2-toolkit)
 BuildRequires:  pkgconfig(libtzplatform-config)
 BuildRequires:  pkgconfig(glesv2)
+BuildRequires:  pkgconfig(libtbm)
 
 %description
 A simple DALi example with resources and a style.

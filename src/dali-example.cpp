@@ -1,23 +1,4 @@
 /*
- * Copyright (c) 2020 Samsung Electronics Co., Ltd.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#if 1
-
-/*
  * Copyright (c) 2018 Samsung Electronics Co., Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -45,17 +26,28 @@
 #include <fcntl.h>
 #include <math.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <tbm_bufmgr.h>
+#include <tbm_surface.h>
+#include <tbm_surface_internal.h>
+#include <tbm_surface_queue.h>
 
 #include <dali-toolkit/dali-toolkit.h>
 #include <dali/devel-api/adaptor-framework/gl-window.h>
+#include <dali/devel-api/adaptor-framework/gl-window-extensions.h>
 #include <dali/devel-api/adaptor-framework/window-devel.h>
 #include <dali/integration-api/debug.h>
+
 
 using namespace Dali;
 using Dali::Toolkit::TextLabel;
 
+static Dali::GlWindow  mGLWindow;
+
 #define SCREEN_WIDTH            1280
 #define SCREEN_HEIGHT           720
+
+#define ENABLE_GL_OFFSCREEN     0
 
 const Vector4 WINDOW_COLOR(0.0f, 0.0f, 0.0f, 0.0f );
 
@@ -67,8 +59,6 @@ const Vector4 WINDOW_COLOR(0.0f, 0.0f, 0.0f, 0.0f );
 # endif
 #endif
 
-
-
 #ifdef LOG_TAG
 #undef LOG_TAG
 #endif
@@ -77,484 +67,962 @@ typedef struct {
     float x, y;
 } FloatPoint;
 
+typedef struct _matrix matrix_t;
+struct _matrix
+{
+    GLfloat m[4][4];
+};
+
 /* Application data */
-typedef struct GLDATA {
-    float model[16];
-    float view[16];
-    float mvp[16];
-
-    FloatPoint anglePoint;
-    FloatPoint curPoint;
-    FloatPoint prevPoint;
-
-    /*A program object is an object to which shader objects can be attached*/
-    unsigned int program;
-
-    /* Generate Vertex Buffer */
-    unsigned int vbo;
-
-    int width;
-    int height;
-
+typedef struct GLDATA
+{
     bool mouse_down;
 
     int windowAngle;
 
     bool initialized;
+
+    int width;
+    int height;
+
+    FloatPoint anglePoint;
+    FloatPoint curPoint;
+    FloatPoint prevPoint;
+
+    ////////////////////////////////////////////////////////////////////////
+    // OnScreen
+
+    GLuint onscreen_programObject;
+
+    // Attribute locations
+    GLint  positionLoc;
+    GLint  texCoordLoc;
+
+    // Sampler location
+    GLint samplerLoc;
+
+    GLint mvpLoc;
+    // Texture handle
+    GLuint textureId;
+
+    matrix_t perspective;
+    matrix_t mvp_matrix;
+
+    ////////////////////////////////////////////////////////////////////////
+    /// egl Image Extension
+    ///
+    int mCount;
+    Dali::GlWindowExtensions::ImageExtension mImageExtension;
+    Dali::GlWindowExtensions::SyncExtension mSyncExtension;
+
+    ////////////////////////////////////////////////////////////////////////
+    /// Offscreen
+    ///
+    tbm_bufmgr mTbmDisplay;
+    tbm_surface_queue_h mTbmSurfaceQueue;
+    tbm_surface_h mCurrentSurface;
+
+    /// Window handle
+    EGLNativeWindowType  hWnd;
+
+    /// EGL display
+    EGLDisplay  eglDisplay;
+
+    /// EGL context
+    EGLContext  eglContext;
+
+    /// EGL surface
+    EGLSurface  eglSurface;
+
+    /// Offscreen program object
+    GLuint offscreen_programObject;
+
+    bool IsCreatedEGLImage;
+    bool IsCreatedSyncObject;
+
 } GLData;
 static GLData mGLData;
 
-#if 0
-/* Define the cube's vertices
-   Each vertex consist of x, y, z, r, g, b */
-static const float cube_vertices[] = {
-    /* front surface is blue */
-    0.5, 0.5, 0.5, 0.0, 0.0, 1.0,
-    -0.5, -0.5, 0.5, 0.0, 0.0, 1.0,
-    0.5, -0.5, 0.5, 0.0, 0.0, 1.0,
-    0.5, 0.5, 0.5, 0.0, 0.0, 1.0,
-    -0.5, 0.5, 0.5, 0.0, 0.0, 1.0,
-    -0.5, -0.5, 0.5, 0.0, 0.0, 1.0,
-    /* left surface is green */
-    -0.5, 0.5, 0.5, 0.0, 1.0, 0.0,
-    -0.5, -0.5, -0.5, 0.0, 1.0, 0.0,
-    -0.5, -0.5, 0.5, 0.0, 1.0, 0.0,
-    -0.5, 0.5, 0.5, 0.0, 1.0, 0.0,
-    -0.5, 0.5, -0.5, 0.0, 1.0, 0.0,
-    -0.5, -0.5, -0.5, 0.0, 1.0, 0.0,
-    /* top surface is red */
-    -0.5, 0.5, 0.5, 1.0, 0.0, 0.0,
-    0.5, 0.5, -0.5, 1.0, 0.0, 0.0,
-    -0.5, 0.5, -0.5, 1.0, 0.0, 0.0,
-    -0.5, 0.5, 0.5, 1.0, 0.0, 0.0,
-    0.5, 0.5, 0.5, 1.0, 0.0, 0.0,
-    0.5, 0.5, -0.5, 1.0, 0.0, 0.0,
-    /* right surface is yellow */
-    0.5, 0.5, -0.5, 1.0, 1.0, 0.0,
-    0.5, -0.5, 0.5, 1.0, 1.0, 0.0,
-    0.5, -0.5, -0.5, 1.0, 1.0, 0.0,
-    0.5, 0.5, -0.5, 1.0, 1.0, 0.0,
-    0.5, 0.5, 0.5, 1.0, 1.0, 0.0,
-    0.5, -0.5, 0.5, 1.0, 1.0, 0.0,
-    /* back surface is cyan */
-    -0.5, 0.5, -0.5, 0.0, 1.0, 1.0,
-    0.5, -0.5, -0.5, 0.0, 1.0, 1.0,
-    -0.5, -0.5, -0.5, 0.0, 1.0, 1.0,
-    -0.5, 0.5, -0.5, 0.0, 1.0, 1.0,
-    0.5, 0.5, -0.5, 0.0, 1.0, 1.0,
-    0.5, -0.5, -0.5, 0.0, 1.0, 1.0,
-    /* bottom surface is magenta */
-    -0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-    0.5, -0.5, 0.5, 1.0, 0.0, 1.0,
-    -0.5, -0.5, 0.5, 1.0, 0.0, 1.0,
-    -0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-    0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-    0.5, -0.5, 0.5, 1.0, 0.0, 1.0
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// common
+
+static GLfloat vtxs[] =
+{
+    0.0f, 1.0f, 0.0f,
+    1.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f,
+    1.0f, 0.0f, 0.0f
 };
 
-/* Vertex Shader Source */
-static const char vertex_shader[] =
-    "attribute vec4 vPosition;\n"
-    "attribute vec3 inColor;\n"
-    "uniform mat4 mvpMatrix;"
-    "varying vec3 outColor;\n"
-    "void main()\n"
-    "{\n"
-    "   outColor = inColor;\n"
-    "   gl_Position = mvpMatrix * vPosition;\n"
-    "}\n";
-
-/* Fragment Shader Source */
-static const char fragment_shader[] =
-    "#ifdef GL_ES\n"
-    "precision mediump float;\n"
-    "#endif\n"
-    "varying vec3 outColor;\n"
-    "void main()\n"
-    "{\n"
-    "   gl_FragColor = vec4 ( outColor, 1.0 );\n"
-    "}\n";
-
-
-
-static void generateAndBindBuffer(unsigned int *vbo);
-static void init_matrix(float matrix[16]);
-static void init_shaders(GLData* glData);
-static void multiply_matrix(float matrix[16], const float matrix0[16], const float matrix1[16]);
-static void rotate_xyz(float matrix[16], const float anglex, const float angley, const float anglez);
-static int view_set_ortho(float result[16], const float left, const float right, const float bottom, const float top, const float near, const float far);
-
-// Internal functions
-/*
- * brief Generate and bind vertex buffer.
- */
-static void generateAndBindBuffer(unsigned int *vbo)
+static GLfloat texcoords[] =
 {
-  /* Generate buffer object names */
-  glGenBuffers(1, vbo);
+    0.0f, 1.0f,
+    1.0f, 1.0f,
+    0.0f, 0.0f,
+    1.0f, 0.0f
+};
 
-  /* Bind a named buffer object */
-  glBindBuffer(GL_ARRAY_BUFFER, *vbo);
+static void
+_matrix_load_identity(matrix_t *res)
+{
+    memset(res, 0x0, sizeof(matrix_t));
 
-  /* Creates and initializes a buffer object's data store */
-  glBufferData(GL_ARRAY_BUFFER, 3 * 72 * 4, cube_vertices, GL_STATIC_DRAW);
+    res->m[0][0] = 1.0f;
+    res->m[1][1] = 1.0f;
+    res->m[2][2] = 1.0f;
+    res->m[3][3] = 1.0f;
 }
 
-/*
- * @ brief Initialize matrix
- * @ param[in]
- *     1 0 0 0
- *     0 1 0 0
- *     0 0 1 0
- *     0 0 0 1
- */
-static  void init_matrix(float matrix[16])
+static void
+_matrix_translate(matrix_t *res, GLfloat tx, GLfloat ty, GLfloat tz)
 {
-  matrix[0] = 1.0f;
-  matrix[1] = 0.0f;
-  matrix[2] = 0.0f;
-  matrix[3] = 0.0f;
-  matrix[4] = 0.0f;
-  matrix[5] = 1.0f;
-  matrix[6] = 0.0f;
-  matrix[7] = 0.0f;
-  matrix[8] = 0.0f;
-  matrix[9] = 0.0f;
-  matrix[10] = 1.0f;
-  matrix[11] = 0.0f;
-  matrix[12] = 0.0f;
-  matrix[13] = 0.0f;
-  matrix[14] = 0.0f;
-  matrix[15] = 1.0f;
+    res->m[3][0] += (res->m[0][0] * tx + res->m[1][0] * ty + res->m[2][0] * tz);
+    res->m[3][1] += (res->m[0][1] * tx + res->m[1][1] * ty + res->m[2][1] * tz);
+    res->m[3][2] += (res->m[0][2] * tx + res->m[1][2] * ty + res->m[2][2] * tz);
+    res->m[3][3] += (res->m[0][3] * tx + res->m[1][3] * ty + res->m[2][3] * tz);
 }
 
-/**
- * @ brief Initialize vertex shader and fragment shader.
- */
-static  void init_shaders(GLData* glData)
+static void
+_matrix_multiply(matrix_t *res, matrix_t *src_a, matrix_t *src_b)
 {
-  const char *p = vertex_shader;
-  unsigned int vtx_shader = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vtx_shader, 1, &p, NULL);
-  glCompileShader(vtx_shader);
+    matrix_t tmp;
+    int i;
 
-  p = fragment_shader;
-  unsigned int fgmt_shader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fgmt_shader, 1, &p, NULL);
-  glCompileShader(fgmt_shader);
-
-  glData->program = glCreateProgram();
-  glAttachShader(glData->program, vtx_shader);
-  glAttachShader(glData->program, fgmt_shader);
-  glBindAttribLocation(glData->program, 0, "vPosition");
-  glBindAttribLocation(glData->program, 1, "inColor");
-
-  glLinkProgram(glData->program);
-  glUseProgram(glData->program);
-}
-
-/*
- * @ brief Multiply 4x4 matrix
- * @ param[in] matrix
- * @ param[in] matrix0
- * @ param[in] matrix1
- * @ matrix = matrix0 x matrix1
- */
-static void multiply_matrix(float matrix[16], const float matrix0[16], const float matrix1[16])
-{
-  int i;
-  int row;
-  int column;
-  float temp[16];
-
-  for (column = 0; column < 4; column++)
-  {
-    for (row = 0; row < 4; row++)
+    for( i = 0; i < 4; i++ )
     {
-      temp[column * 4 + row] = 0.0f;
-      for (i = 0; i < 4; i++)
-      {
-        temp[column * 4 + row] += matrix0[i * 4 + row] * matrix1[column * 4 + i];
-      }
+        tmp.m[i][0] = (src_a->m[i][0] * src_b->m[0][0]) +
+            (src_a->m[i][1] * src_b->m[1][0]) +
+            (src_a->m[i][2] * src_b->m[2][0]) +
+            (src_a->m[i][3] * src_b->m[3][0]) ;
+
+        tmp.m[i][1] = (src_a->m[i][0] * src_b->m[0][1]) +
+            (src_a->m[i][1] * src_b->m[1][1]) +
+            (src_a->m[i][2] * src_b->m[2][1]) +
+            (src_a->m[i][3] * src_b->m[3][1]) ;
+
+        tmp.m[i][2] = (src_a->m[i][0] * src_b->m[0][2]) +
+            (src_a->m[i][1] * src_b->m[1][2]) +
+            (src_a->m[i][2] * src_b->m[2][2]) +
+            (src_a->m[i][3] * src_b->m[3][2]) ;
+
+        tmp.m[i][3] = (src_a->m[i][0] * src_b->m[0][3]) +
+            (src_a->m[i][1] * src_b->m[1][3]) +
+            (src_a->m[i][2] * src_b->m[2][3]) +
+            (src_a->m[i][3] * src_b->m[3][3]) ;
     }
-  }
-
-  for (i = 0; i < 16; i++)
-  {
-    matrix[i] = temp[i];
-  }
+    memcpy( res, &tmp, sizeof(matrix_t) );
 }
 
-/*
- * @ brief Rotate a matrix
- * @ param[in] matrix The matrix rotated angle.
- * @ param[in] anglex Rotate x-angle.
- * @ param[in] angley Rotate y-angle.
- * @ param[in] anglez Rotate z-angle.
- */
-static void rotate_xyz(float matrix[16], const float anglex, const float angley, const float anglez)
+static void
+_matrix_scale(matrix_t *res, GLfloat sx, GLfloat sy, GLfloat sz)
 {
-  const float pi = 3.141592f;
-  float temp[16];
-  float rz = 2.0f * pi * anglez / 360.0f;
-  float rx = 2.0f * pi * anglex / 360.0f;
-  float ry = 2.0f * pi * angley / 360.0f;
+    res->m[0][0] *= sx;
+    res->m[0][1] *= sx;
+    res->m[0][2] *= sx;
+    res->m[0][3] *= sx;
 
-  float sy = sinf(ry);
-  float cy = cosf(ry);
-  float sx = sinf(rx);
-  float cx = cosf(rx);
-  float sz = sinf(rz);
-  float cz = cosf(rz);
-  init_matrix(temp);
+    res->m[1][0] *= sy;
+    res->m[1][1] *= sy;
+    res->m[1][2] *= sy;
+    res->m[1][3] *= sy;
 
-  temp[0] = cy * cz - sx * sy * sz;
-  temp[1] = cz * sx * sy + cy * sz;
-  temp[2] = -cx * sy;
-
-  temp[4] = -cx * sz;
-  temp[5] = cx * cz;
-  temp[6] = sx;
-
-  temp[8] = cz * sy + cy * sx * sz;
-  temp[9] = -cy * cz * sx + sy * sz;
-  temp[10] = cx * cy;
-
-  multiply_matrix(matrix, matrix, temp);
+    res->m[2][0] *= sz;
+    res->m[2][1] *= sz;
+    res->m[2][2] *= sz;
+    res->m[2][3] *= sz;
 }
 
-/*
- * @ brief Creates a matrix for an orthographic parallel viewing volume.
- * @ param[in] result
- * @ param[in] left, right Specify the coordinates for the left and right vertical clipping planes.
- * @ param[in] bottom, top Specify the coordinates for the bottom and top horizontal clipping planes.
- * @ param[in] near, far   Specify the distances to the nearer and farther depth clipping planes.
- *			   These values are negative if the plane is the plane is to be behind the viewer.
- */
-static int view_set_ortho(float result[16], const float left, const float right,
-               const float bottom, const float top, const float near, const float far)
+static void
+_matrix_frustum(matrix_t *res, float left, float right, float bottom,
+                float top, float near, float far)
 {
-  if ((right - left) == 0.0f || (top - bottom) == 0.0f || (far - near) == 0.0f)
-  {
-    return 0;
-  }
+    float d_x = right - left;
+    float d_y = top - bottom;
+    float d_z = far - near;
+    matrix_t frust;
 
-  result[0] = 2.0f / (right - left);
-  result[1] = 0.0f;
-  result[2] = 0.0f;
-  result[3] = 0.0f;
-  result[4] = 0.0f;
-  result[5] = 2.0f / (top - bottom);
-  result[6] = 0.0f;
-  result[7] = 0.0f;
-  result[8] = 0.0f;
-  result[9] = 0.0f;
-  result[10] = -2.0f / (far - near);
-  result[11] = 0.0f;
-  result[12] = -(right + left) / (right - left);
-  result[13] = -(top + bottom) / (top - bottom);
-  result[14] = -(far + near) / (far - near);
-  result[15] = 1.0f;
+    if ( (near <= 0.0f) || (far <= 0.0f) || (d_x <= 0.0f) || (d_y <= 0.0f) || (d_z <= 0.0f) ) return;
 
-  return 1;
+    frust.m[0][0] = 2.0f * near / d_x;
+    frust.m[0][1] = frust.m[0][2] = frust.m[0][3] = 0.0f;
+
+    frust.m[1][1] = 2.0f * near / d_y;
+    frust.m[1][0] = frust.m[1][2] = frust.m[1][3] = 0.0f;
+
+    frust.m[2][0] = (right + left) / d_x;
+    frust.m[2][1] = (top + bottom) / d_y;
+    frust.m[2][2] = -(near + far) / d_z;
+    frust.m[2][3] = -1.0f;
+
+    frust.m[3][2] = -2.0f * near * far / d_z;
+    frust.m[3][0] = frust.m[3][1] = frust.m[3][3] = 0.0f;
+
+    _matrix_multiply( res, &frust, res );
 }
-#endif
-////////////////////////////////////////////////////////////////////////////
-////
 
-static float        red = 1.0;
-static GLuint       program;
-static GLuint       vtx_shader;
-static GLuint       fgmt_shader;
-static GLuint       vbo;
+static void
+_window_coord(matrix_t *mtx, int w, int h)
+{
+        float fovy, aspect, znear, zfar;
+    float xmin, xmax, ymin, ymax;
 
-static GLuint load_shader( GLenum type, const char *shader_src );
-static int init_shaders();
+    float z_camera;
+//    float fovy_rad;
 
-static GLuint load_shader( GLenum type, const char *shader_src )
+    glViewport( 0, 0, w, h );
+
+    fovy = 60.0f;
+    aspect = 1.0f;
+    znear = 0.1f;
+    zfar = 100.0f;
+
+    ymax = znear * tan( fovy * M_PI / 360.0f );
+    ymin = -ymax;
+    xmax = ymax * aspect;
+    xmin = ymin * aspect;
+
+    _matrix_load_identity( mtx );
+    _matrix_frustum( mtx, xmin, xmax, ymin, ymax, znear, zfar );
+
+    z_camera = 0.866f;
+
+    _matrix_translate( mtx, -0.5f, -0.5f, -z_camera );
+    _matrix_scale( mtx, 1.0f/w, -1.0f/h, 1.0f/w );
+    _matrix_translate( mtx, 0.0f, -1.0f*h, 0.0f );
+
+
+//finish:
+
+    return;
+}
+
+GLuint esLoadShader ( GLenum type, const char *shaderSrc )
 {
    GLuint shader;
-   // Create the shader object
-   shader = glCreateShader(type);
-   if (shader==0)
-     return 0;
+   GLint compiled;
 
-   // Load/Compile shader source
-   glShaderSource(shader, 1, &shader_src, NULL);
-   glCompileShader(shader);
+   // Create the shader object
+   shader = glCreateShader ( type );
+
+   if ( shader == 0 )
+    return 0;
+
+   // Load the shader source
+   glShaderSource ( shader, 1, &shaderSrc, NULL );
+
+   // Compile the shader
+   glCompileShader ( shader );
+
+   // Check the compile status
+   glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
+
+   if ( !compiled )
+   {
+      GLint infoLen = 0;
+
+      glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
+
+      if ( infoLen > 1 )
+      {
+         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+
+         glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
+         printf ( "Error compiling shader:\n%s\n", infoLog );
+
+         free ( infoLog );
+      }
+
+      glDeleteShader ( shader );
+      return 0;
+   }
 
    return shader;
+
 }
 
-// Initialize the shader and program object
-static int init_shaders()
+GLuint esLoadProgram ( const char *vertShaderSrc, const char *fragShaderSrc )
 {
-   GLbyte vShaderStr[] =
-      "attribute vec4 vPosition;    \n"
-      "void main()                  \n"
-      "{                            \n"
-      "   gl_Position = vPosition;  \n"
-      "}                            \n";
-
-   GLbyte fShaderStr[] =
-      "#ifdef GL_ES                                 \n"
-      "precision mediump float;                     \n"
-      "#endif                                       \n"
-      "void main()                                  \n"
-      "{                                            \n"
-      "  gl_FragColor = vec4 ( 1.0, 0.0, 0.0, 1.0 );\n"
-      "}                                            \n";
-
+   GLuint vertexShader;
+   GLuint fragmentShader;
+   GLuint programObject;
    GLint linked;
 
    // Load the vertex/fragment shaders
-   vtx_shader  = load_shader( GL_VERTEX_SHADER, (const char*)vShaderStr);
-   fgmt_shader = load_shader( GL_FRAGMENT_SHADER, (const char*)fShaderStr);
+   vertexShader = esLoadShader ( GL_VERTEX_SHADER, vertShaderSrc );
+   if ( vertexShader == 0 )
+      return 0;
+
+   fragmentShader = esLoadShader ( GL_FRAGMENT_SHADER, fragShaderSrc );
+   if ( fragmentShader == 0 )
+   {
+      glDeleteShader( vertexShader );
+      return 0;
+   }
 
    // Create the program object
-   program = glCreateProgram( );
-   if (program == 0 )
-     return 0;
+   programObject = glCreateProgram ( );
 
-   glAttachShader(program, vtx_shader);
-   glAttachShader(program, fgmt_shader);
+   if ( programObject == 0 )
+      return 0;
 
-   glBindAttribLocation(program, 0, "vPosition");
-   glLinkProgram(program);
-   glGetProgramiv(program, GL_LINK_STATUS, &linked);
-   return 1;
+   glAttachShader ( programObject, vertexShader );
+   glAttachShader ( programObject, fragmentShader );
+
+   // Link the program
+   glLinkProgram ( programObject );
+
+   // Check the link status
+   glGetProgramiv ( programObject, GL_LINK_STATUS, &linked );
+
+   if ( !linked )
+   {
+      GLint infoLen = 0;
+
+      glGetProgramiv ( programObject, GL_INFO_LOG_LENGTH, &infoLen );
+
+      if ( infoLen > 1 )
+      {
+         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+
+         glGetProgramInfoLog ( programObject, infoLen, NULL, infoLog );
+         printf ( "Error linking program:\n%s\n", infoLog );
+
+         free ( infoLog );
+      }
+
+      glDeleteProgram ( programObject );
+      return 0;
+   }
+
+   // Free up no longer needed shader resources
+   glDeleteShader ( vertexShader );
+   glDeleteShader ( fragmentShader );
+
+   return programObject;
 }
 
-////
-////////////////////////////////////////////////////////////////////////////
+GLuint LoadShader ( GLenum type, char *shaderSrc )
+{
+    GLuint shader;
+    GLint compiled;
+    GLenum glErrorResult;
 
+    // Create the shader object
+    shader = glCreateShader ( type );
+
+    if ( shader == 0 ) {
+        if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+            printf("[glCreateShader][glGetError] 0x%04X\n", glErrorResult);
+        return 0;
+    }
+
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glCreateShader][glGetError] 0x%04X\n", glErrorResult);
+    printf("[glCreateShader] Success.\n");
+
+    // Load the shader source
+    glShaderSource ( shader, 1, &shaderSrc, NULL );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glShaderSource][glGetError] 0x%04X\n", glErrorResult);
+
+    // Compile the shader
+    glCompileShader ( shader );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glCompileShader][glGetError] 0x%04X\n", glErrorResult);
+
+    // Check the compile status
+    glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glGetShaderiv][glGetError] 0x%04X\n", glErrorResult);
+
+    if ( !compiled )
+    {
+        GLint infoLen = 0;
+
+        glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
+
+        if ( infoLen > 1 )
+        {
+            char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+
+            glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
+            printf ( "[glGetShaderiv] Error compiling shader:\n%s\n", infoLog );
+
+            free ( infoLog );
+        }
+
+        glDeleteShader ( shader );
+        return 0;
+    }
+
+    return shader;
+
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// onscreen
+
+int Init_tex()
+{
+    const char vShaderStr[] =
+      "attribute vec4 a_position;   \n"
+      "attribute vec2 a_texCoord;   \n"
+      "varying vec2 v_texCoord;     \n"
+      "void main()                  \n"
+      "{                            \n"
+      "   gl_Position = a_position; \n"
+      "   v_texCoord = a_texCoord;  \n"
+      "}                            \n";
+
+   const char fShaderStr[] =
+      "#extension GL_OES_EGL_image_external:require        \n"
+      "precision mediump float;                            \n"
+      "varying vec2 v_texCoord;                            \n"
+      "uniform samplerExternalOES s_texture;               \n"
+      "void main()                                         \n"
+      "{                                                   \n"
+      "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
+      "}                                                   \n";
+
+    //GLint linked;
+
+    //GLenum glErrorResult;
+
+    _matrix_load_identity(&mGLData.perspective);
+    _window_coord(&mGLData.perspective, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+    // Load the shaders and get a linked program object
+    mGLData.onscreen_programObject = esLoadProgram(vShaderStr, fShaderStr);
+
+    // Get the attribute locations
+    mGLData.positionLoc = glGetAttribLocation(mGLData.onscreen_programObject, "a_position");
+    mGLData.texCoordLoc = glGetAttribLocation(mGLData.onscreen_programObject, "a_texCoord");
+    mGLData.mvpLoc = glGetAttribLocation(mGLData.onscreen_programObject, "u_mvp_matrix");
+    mGLData.samplerLoc = glGetUniformLocation (mGLData.onscreen_programObject, "s_texture");
+
+
+    glDisable(GL_BLEND);
+
+    glGenTextures(1, &mGLData.textureId);
+    glBindTexture(GL_TEXTURE_2D, mGLData.textureId);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)NULL);
+
+    glClearColor( 0.4f, 0.4f, 0.8f, 1.0f );
+
+    glUseProgram(mGLData.onscreen_programObject);
+
+    glVertexAttribPointer(mGLData.positionLoc, 3, GL_FLOAT, GL_FALSE, 0, vtxs);
+    glEnableVertexAttribArray(mGLData.positionLoc);
+
+    glVertexAttribPointer(mGLData.texCoordLoc, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+    glEnableVertexAttribArray(mGLData.texCoordLoc);
+
+    return 1;
+}
+
+void init_onscreen()
+{
+  Init_tex();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// offscreen
+
+int createTBMWindow()
+{
+#if ENABLE_GL_OFFSCREEN
+    mGLData.mTbmDisplay = tbm_bufmgr_init(-1);
+
+    if (!mGLData.mTbmDisplay) {
+        printf("[TBM native display] Failed on init .\n");
+        return 0;
+    } else {
+        printf("[TBM native display] Success on init.\n");
+    }
+
+    mGLData.mTbmSurfaceQueue = tbm_surface_queue_create(3, SCREEN_WIDTH, SCREEN_HEIGHT, TBM_FORMAT_ARGB8888, 0);
+    if (!mGLData.mTbmSurfaceQueue) {
+        printf("[TBM native window] Failed on init .\n");
+        return 0;
+    } else {
+        printf("[TBM native window] Success on init.\n");
+    }
+
+    mGLData.hWnd = (EGLNativeWindowType)mGLData.mTbmSurfaceQueue;
+#else
+    tbm_surface_info_s info;
+    int w = SCREEN_WIDTH, h = SCREEN_HEIGHT;
+    int i, j;
+
+    mGLData.mCurrentSurface = tbm_surface_create(SCREEN_WIDTH, SCREEN_HEIGHT, TBM_FORMAT_ARGB8888);
+    //fprintf(stderr,"%s : create surface %p\n",__FUNCTION__,mGLData.mCurrentSurface);
+    //fprintf(stderr,"%s : call tbm_surface_map %p\n",__FUNCTION__,mGLData.mCurrentSurface);
+    tbm_surface_map(mGLData.mCurrentSurface, TBM_SURF_OPTION_WRITE|TBM_SURF_OPTION_READ, &info);
+    unsigned char *ptr = info.planes[0].ptr;
+    for (j=0; j<h; j++)
+    {
+       for (i=0; i<w; i++)
+       {
+          ptr[0] = 255;
+          ptr[1] = 0;
+          ptr[2] = 0;
+          ptr[3] = 255;
+          ptr += 4;
+       }
+    }
+
+    //fprintf(stderr,"%s : call tbm_surface_unmap %p\n",__FUNCTION__,mGLData.mCurrentSurface);
+    tbm_surface_unmap(mGLData.mCurrentSurface);
+#endif
+    return 1;
+}
+
+int createOffscreenEGLContext()
+{
+    EGLint attribList[] =
+    {
+        EGL_RED_SIZE,       5,
+        EGL_GREEN_SIZE,     6,
+        EGL_BLUE_SIZE,      5,
+        EGL_ALPHA_SIZE,     8,
+        EGL_DEPTH_SIZE,     8,
+        EGL_STENCIL_SIZE,   8,
+        EGL_SAMPLE_BUFFERS, 1,
+        EGL_NONE
+    };
+
+    EGLint numConfigs;
+    EGLint majorVersion;
+    EGLint minorVersion;
+    EGLDisplay display;
+    EGLContext context;
+    EGLSurface surface;
+    EGLConfig config;
+    EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE, EGL_NONE };
+
+    EGLint eglErrorResult;
+
+    // Get Display
+    display = eglGetDisplay(mGLData.mTbmDisplay);
+    eglErrorResult = eglGetError();
+
+    if ( display == EGL_NO_DISPLAY )
+    {
+       printf("[eglGetDisplay] Failed.");
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetDisplay][eglGetError] 0x%04X\n", eglErrorResult);
+
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetDisplay][eglGetError] 0x%04X\n", eglErrorResult);
+
+    printf("[eglGetDisplay] Success.\n");
+
+    // Initialize EGL
+    if ( !eglInitialize(display, &majorVersion, &minorVersion) )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglInitialize][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglInitialize][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglInitialize] Success.\n");
+
+    // Get configs
+    if ( !eglGetConfigs(display, NULL, 0, &numConfigs) )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetConfigs][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetConfigs][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglGetConfigs] Success.\n");
+
+    // Choose config
+    if ( !eglChooseConfig(display, attribList, &config, 1, &numConfigs) )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglChooseConfig][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglChooseConfig][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglChooseConfig] Success.\n");
+
+    // Create a surface
+    surface = eglCreateWindowSurface(display, config, (EGLNativeWindowType)mGLData.hWnd, NULL);
+    if ( surface == EGL_NO_SURFACE )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateWindowSurface][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateWindowSurface][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglCreateWindowSurface] Success.\n");
+
+    // Create a GL context
+    context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs );
+    if ( context == EGL_NO_CONTEXT )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateContext][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateContext][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglCreateContext] Success.\n");
+
+    // Make the context current
+    if ( !eglMakeCurrent(display, surface, surface, context) )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
+       return 0;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
+    printf("[eglMakeCurrent] Success.\n");
+
+    mGLData.eglDisplay = display;
+    mGLData.eglSurface = surface;
+    mGLData.eglContext = context;
+    return 1;
+}
+int initOffscreenShader()
+{
+    GLbyte vShaderStr[] =
+        "attribute vec4 vPosition;    \n"
+        "void main()                  \n"
+        "{                            \n"
+        "   gl_Position = vPosition;  \n"
+        "}                            \n";
+
+    GLbyte fShaderStr[] =
+        "precision mediump float;\n"\
+        "void main()                                  \n"
+        "{                                            \n"
+        "  gl_FragColor = vec4 ( 0.0, 1.0, 0.0, 1.0 );\n"
+        "}                                            \n";
+
+    GLuint vertexShader;
+    GLuint fragmentShader;
+    GLuint programObject;
+    GLint linked;
+
+    GLenum glErrorResult;
+
+    // Load the vertex/fragment shaders
+    vertexShader = LoadShader ( GL_VERTEX_SHADER, (char*)vShaderStr );
+    fragmentShader = LoadShader ( GL_FRAGMENT_SHADER, (char*)fShaderStr );
+
+    // Create the program object
+    programObject = glCreateProgram ( );
+
+    if ( programObject == 0 ) {
+        if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+            printf("[glCreateProgram][glGetError] 0x%04X\n", glErrorResult);
+        printf("[glCreateProgram] Failed.\n");
+        return 0;
+    }
+    printf("[glCreateProgram] Success.\n");
+
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glGetShaderiv][glGetError] 0x%04X\n", glErrorResult);
+
+    glAttachShader ( programObject, vertexShader );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glAttachShader-vertex][glGetError] 0x%04X\n", glErrorResult);
+    glAttachShader ( programObject, fragmentShader );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glAttachShader-fragment][glGetError] 0x%04X\n", glErrorResult);
+
+    // Bind vPosition to attribute 0
+    glBindAttribLocation ( programObject, 0, "vPosition" );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glBindAttribLocation][glGetError] 0x%04X\n", glErrorResult);
+
+    // Link the program
+    glLinkProgram ( programObject );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glLinkProgram][glGetError] 0x%04X\n", glErrorResult);
+
+    // Check the link status
+    glGetProgramiv ( programObject, GL_LINK_STATUS, &linked );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glGetProgramiv][glGetError] 0x%04X\n", glErrorResult);
+
+    if ( !linked )
+    {
+        GLint infoLen = 0;
+
+        glGetProgramiv ( programObject, GL_INFO_LOG_LENGTH, &infoLen );
+
+        if ( infoLen > 1 )
+        {
+            char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+
+            glGetProgramInfoLog ( programObject, infoLen, NULL, infoLog );
+            printf ( "[glGetProgramiv] Error linking program:\n%s\n", infoLog );
+
+            free ( infoLog );
+        }
+
+        glDeleteProgram ( programObject );
+        return 0;
+    }
+
+    // Store the program object
+    mGLData.offscreen_programObject = programObject;
+
+    glClearColor ( 0.0f, 0.0f, 0.0f, 0.0f );
+    return 1;
+}
+
+void init_offscreen()
+{
+  createTBMWindow();
+#ifndef ENABLE_GL_OFFSCREEN
+  createOffscreenEGLContext();
+  initOffscreenShader();
+#endif
+}
 
 // pullic Callbacks
 // intialize callback that gets called once for intialization
 API void initialize_gl()
 {
-  #if 1
    printf("init_gl start~~~~\n");
-   GLfloat vVertices[] = {
-        0.0f,  0.5f, 0.0f,
+
+   mGLData.mImageExtension = Dali::GlWindowExtensions::ImageExtension::New( mGLWindow );
+   mGLData.mSyncExtension = Dali::GlWindowExtensions::SyncExtension::New( mGLWindow );
+
+   mGLData.IsCreatedEGLImage = false;
+   mGLData.IsCreatedSyncObject = false;
+
+   init_onscreen();
+
+   init_offscreen();
+
+   mGLData.mCount = 0;
+}
+
+void Draw_offscreen()
+{
+    //printf("Draw_offscreen\n");
+#if ENABLE_GL_OFFSCREEN
+    EGLint eglErrorResult;
+    if ( !eglMakeCurrent(mGLData.eglDisplay, mGLData.eglSurface, mGLData.eglSurface, mGLData.eglContext) )
+    {
+       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS)
+           printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
+       return;
+    }
+
+    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS)
+    {
+        printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
+        return;
+    }
+    printf("[eglMakeCurrent] Success.\n");
+
+    GLfloat vVertices[] = {  0.0f,  0.5f, 0.0f,
         -0.5f, -0.5f, 0.0f,
         0.5f, -0.5f, 0.0f };
 
-   if (!init_shaders())
-     {
-        printf("Error Initializing Shaders\n");
-        return;
-     }
+    GLenum glErrorResult;
 
-   glGenBuffers(1, &vbo);
-   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-   glBufferData(GL_ARRAY_BUFFER, 3 * 3 * 4, vVertices, GL_STATIC_DRAW);
-  #else
-  mGLData.anglePoint.x = 45.f;
-  mGLData.anglePoint.y = 45.f;
-  /* Initialize shaders */
-  init_shaders(&mGLData);
-  /* Initlalize Camera View */
-  init_matrix(mGLData.view);
-  /* Generate and bind Vertex buffer object */
-  generateAndBindBuffer(&(mGLData.vbo));
+    // Set the viewport
+    glViewport ( 0, 0, 100, 100 );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glViewport][glGetError] 0x%04X\n", glErrorResult);
 
-  /* Calculate view aspect */
-  float aspect = (mGLData.width> mGLData.height ? (float)mGLData.width/mGLData.height : (float)mGLData.height/mGLData.width);
-  if (mGLData.width > mGLData.height)
-  {
-    view_set_ortho(mGLData.view, -1.0*aspect, 1.0*aspect, -1.0, 1.0, -1.0, 100.0);
+    // Clear the color buffer
+    glClear ( GL_COLOR_BUFFER_BIT );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glClear][glGetError][%d] 0x%04X\n", __LINE__, glErrorResult);
+
+    // Use the program object
+    glUseProgram ( mGLData.offscreen_programObject );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glUseProgram][glGetError] 0x%04X\n", glErrorResult);
+
+    // Load the vertex data
+    glVertexAttribPointer ( 0, 3, GL_FLOAT, GL_FALSE, 0, vVertices );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glVertexAttribPointer][glGetError] 0x%04X\n", glErrorResult);
+
+    glEnableVertexAttribArray ( 0 );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glEnableVertexAttribArray][glGetError] 0x%04X\n", glErrorResult);
+
+    glDrawArrays ( GL_TRIANGLES, 0, 3 );
+    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+        printf("[glDrawArrays][glGetError] 0x%04X\n", glErrorResult);
+
+    eglSwapBuffers( mGLData.eglDisplay, mGLData.eglSurface );
+     printf("Draw_offscreen is finished\n");
+#else
+    tbm_surface_info_s info;
+    int i, j;
+
+    //fprintf(stderr,"%s : call tbm_surface_map %p\n",__FUNCTION__,mGLData.mCurrentSurface);
+    tbm_surface_map(mGLData.mCurrentSurface, TBM_SURF_OPTION_WRITE|TBM_SURF_OPTION_READ, &info);
+    unsigned char *ptr = info.planes[0].ptr;
+    unsigned int mark = mGLData.mCount%3;
+    //printf("mark : %d\n", mark);
+    for (j=0; j<SCREEN_HEIGHT; j++)
+    {
+       for (i=0; i<SCREEN_WIDTH; i++)
+       {
+           ptr[0] = 255;
+           ptr[1] = 0;
+           ptr[2] = 0;
+           ptr[3] = 255;
+           ptr[mark] = 255;
+           ptr += 4;
+       }
+    }
+    //fprintf(stderr,"%s : call tbm_surface_unmap %p\n",__FUNCTION__,mGLData.mCurrentSurface);
+    tbm_surface_unmap(mGLData.mCurrentSurface);
+#endif
+}
+
+void Draw_onscreen()
+{
+  //printf("Draw_onscreen\n");
+  tbm_surface_h tbm_surface = nullptr;
+#if ENABLE_GL_OFFSCREEN
+  if (tbm_surface_queue_can_acquire((tbm_surface_queue_h)mGLData.hWnd, 1)) {
+      tbm_surface_queue_acquire((tbm_surface_queue_h)mGLData.hWnd, &tbm_surface);
+      printf("get tbm_surface_queue_acquire: %p\n",tbm_surface);
   }
-  else
+
+  if(!tbm_surface)
   {
-    view_set_ortho(mGLData.view, -1.0, 1.0, -1.0*aspect, 1.0*aspect, -1.0, 100.0);
+    printf("current tbm surface is null\n");
+    return;
   }
 
-  glEnable(GL_DEPTH_TEST);
-  #endif
+  mGLData.mCurrentSurface = tbm_surface;
+  /* Onscreen render */
+  mGLWindow.MakeCurrent();
+  printf("GLWindow Make Current\n");
+#else
+  tbm_surface = mGLData.mCurrentSurface;
+#endif
+
+  GLenum glErrorResult;
+  matrix_t modelview;
+
+  glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  glClearColor(0xff, 0xff, 0xff, 0xff);
+  glClear ( GL_COLOR_BUFFER_BIT );
+
+
+  if( mGLData.IsCreatedEGLImage == false )
+  {
+      printf("try to create EGLImage\n");
+      if( mGLData.mImageExtension.CreateImageKHR(SCREEN_WIDTH, SCREEN_HEIGHT, NativeImageSource::ColorDepth::COLOR_DEPTH_32,tbm_surface ) )
+      {
+          mGLData.IsCreatedEGLImage = true;
+          printf("success to create EGLImage\n");
+      }
+      else
+      {
+          mGLData.IsCreatedEGLImage = false;
+          printf("fail to create EGLImage\n");
+      }
+  }
+
+  //printf("Create EGLImage\n");
+
+  glClear ( GL_COLOR_BUFFER_BIT );
+  if ((glErrorResult = glGetError()) != GL_NO_ERROR)
+      printf("[glClear][glGetError][%d] 0x%04X\n", __LINE__, glErrorResult);
+
+
+  // Store the program object
+
+  glBindTexture(GL_TEXTURE_2D, mGLData.textureId);
+  //printf("Bind Texture : %d\n", mGLData.textureId);
+
+  printf("Success to wait sync object\n");
+  mGLData.mImageExtension.TargetTextureKHR();
+  //printf("Create EGLImage\n");
+
+
+  _matrix_load_identity(&modelview);
+  _matrix_translate(&modelview, 0.0f, 0.0f, 0.0f);
+  _matrix_multiply(&mGLData.mvp_matrix, &modelview, &mGLData.perspective);
+
+  glUniformMatrix4fv(mGLData.mvpLoc, 1, GL_FALSE, (GLfloat *)&mGLData.mvp_matrix.m[0][0]);
+  glUniform1i(mGLData.samplerLoc, 0);
+
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)NULL);
+
+  //printf("Draw_onscreen is finished\n");
 }
 
 // draw callback is where all the main GL rendering happens
 API int renderFrame_gl()
 {
-  #if 1
-   int w = mGLData.width, h = mGLData.height;
+#if ENABLE_GL_OFFSCREEN
+   if( mGLData.mCount > 0 && mGLData.mCurrentSurface )
+   {
+     tbm_surface_queue_release((tbm_surface_queue_h)mGLData.hWnd, mGLData.mCurrentSurface);
+     mGLData.mCurrentSurface = nullptr;
+   }
+#endif
 
-   glViewport(0, 0, w, h);
-   glClearColor(red,0.8,0.3,1);
-   glClear(GL_COLOR_BUFFER_BIT);
+   if(mGLData.IsCreatedSyncObject)
+   {
+       if(mGLData.mSyncExtension.IsSynced())
+       {
+         printf("IsSynced's true\n");
+       }
+       else
+       {
+         printf("IsSynced's false\n");
+       }
 
-   // Draw a Triangle
-   glEnable(GL_BLEND);
+       mGLData.mSyncExtension.DestroySyncObject();
+       mGLData.IsCreatedSyncObject = false;
+   }
 
-   glUseProgram(program);
+   Draw_offscreen();
 
-   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-   glEnableVertexAttribArray(0);
+   Draw_onscreen();
 
-   glDrawArrays(GL_TRIANGLES, 0, 3);
+   if(mGLData.IsCreatedSyncObject ==  false)
+   {
+       if( !mGLData.mSyncExtension.CreateSyncObject() )
+       {
+         printf("Fail to create sync object\n");
+       }
+       else
+       {
+         printf("success to create sync object\n");
+         mGLData.IsCreatedSyncObject = true;
+       }
+   }
 
-   // Optional - Flush the GL pipeline
-   glFinish();
 
-   red -= 0.1;
-   if (red < 0.0)
-     red = 1.0;
+   mGLData.mCount++;
 
    return 1;
-  #else
-  if( mGLData.initialized == false )
-  {
-    initialize_gl();
-    mGLData.initialized = true;
-  }
 
-  int w, h;
-  w = mGLData.width;
-  h = mGLData.height;
-
-  if( mGLData.windowAngle == 90 || mGLData.windowAngle == 270)
-  {
-    glViewport(0, 0, h, w);
-  }
-  else
-  {
-    glViewport(0, 0, w, h);
-  }
-  glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  init_matrix(mGLData.model);
-  rotate_xyz(mGLData.model, mGLData.anglePoint.x, mGLData.anglePoint.y, mGLData.windowAngle);
-
-  multiply_matrix(mGLData.mvp, mGLData.view, mGLData.model);
-  glUseProgram(mGLData.program);
-
-  glBindBuffer(GL_ARRAY_BUFFER, mGLData.vbo);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, 0);
-  glEnableVertexAttribArray(0);
-
-  glBindBuffer(GL_ARRAY_BUFFER, mGLData.vbo);
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void*)(sizeof(float) * 3));
-  glEnableVertexAttribArray(1);
-
-  glUniformMatrix4fv(glGetUniformLocation(mGLData.program, "mvpMatrix"), 1, GL_FALSE, mGLData.mvp);
-
-  /* Render primitives from array data*/
-  glDrawArrays(GL_TRIANGLES, 0, 36);
-  #endif
 }
 
 
 // delete callback gets called when glview is deleted
 API void terminate_gl()
 {
-  #if 1
-   glDeleteShader(vtx_shader);
-   glDeleteShader(fgmt_shader);
-   glDeleteProgram(program);
-   glDeleteBuffers(1, &vbo);
-   #endif
+
 }
 
 API void update_touch_event_state( bool down )
@@ -564,6 +1032,7 @@ API void update_touch_event_state( bool down )
 
 API void update_touch_position(int x, int y)
 {
+#if 0
   float dx = 0;
   float dy = 0;
   mGLData.curPoint.x = (float)x;
@@ -578,17 +1047,20 @@ API void update_touch_position(int x, int y)
   }
   mGLData.prevPoint.x = mGLData.curPoint.x;
   mGLData.prevPoint.y = mGLData.curPoint.y;
+#endif
 }
 
 API void update_window_size(int w, int h)
 {
+#if 0
   mGLData.width = w;
   mGLData.height = h;
+#endif
 }
 
 API void update_window_rotation_angle(int angle)
 {
-  mGLData.windowAngle = angle;
+//  mGLData.windowAngle = angle;
 }
 
 
@@ -613,65 +1085,31 @@ public:
   // The Init signal is received once (only) during the Application lifetime
   void Create( Application& application )
   {
-    #if 0
-    // UI control window
-    Window window = application.GetWindow();
-    mUIWindow = window;
-    window.SetBackgroundColor( WINDOW_COLOR );
-    window.SetTransparency( true );
-
-    window.SetInputRegion( Rect< int >( 0, SCREEN_HEIGHT - 200, SCREEN_WIDTH, 200 ));
-    mTextLabel = TextLabel::New( "Test NativeGL" );
-
-    mTextLabel.SetProperty( Actor::Property::PARENT_ORIGIN, ParentOrigin::BOTTOM_LEFT );
-    mTextLabel.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::BOTTOM_LEFT );
-    mTextLabel.SetProperty( Actor::Property::SIZE, Vector2(SCREEN_WIDTH, 200) );
-    mTextLabel.SetBackgroundColor( Vector4(0.6f,0.2f,0.2f,1.0f) );
-    window.Add( mTextLabel );
-
-    // Respond to a click anywhere on the stage
-    window.GetRootLayer().TouchSignal().Connect( this, &HelloWorldController::OnTouch );
-
-    // Respond to key events
-    window.KeyEventSignal().Connect( this, &HelloWorldController::OnKeyEvent );
-
-    Dali::Vector<Dali::Window::WindowOrientation> orientations;
-    orientations.PushBack( Dali::Window::WindowOrientation::PORTRAIT );
-    orientations.PushBack( Dali::Window::WindowOrientation::LANDSCAPE  );
-    orientations.PushBack( Dali::Window::WindowOrientation::PORTRAIT_INVERSE  );
-    orientations.PushBack( Dali::Window::WindowOrientation::LANDSCAPE_INVERSE  );
-    DevelWindow::SetAvailableOrientations( window, orientations );
-
-    window.ResizeSignal().Connect( this, &HelloWorldController::OnWindowResized );
-    window.Show();
-#endif
     mGLData.initialized = false;
-    mGLWindow = Dali::GlWindow::New(PositionSize(0, 0, 1280, 720),"GLWindowSample","",false);
+    mGLWindow = Dali::GlWindow::New(PositionSize(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT),"GLWindowSample","",false);
     mGLWindow.SetEglConfig( true, true, 0, Dali::GlWindow::GlesVersion::VERSION_2_0 );
-    mGLWindow.SetRenderingMode( Dali::GlWindow::RenderingMode::ON_DEMAND );
     mGLWindow.RegisterGlCallback( Dali::MakeCallback(initialize_gl),
                                   Dali::MakeCallback(renderFrame_gl),
                                   Dali::MakeCallback(terminate_gl) );
+    //mGLWindow.RegisterGlCallback( initialize_gl, renderFrame_gl, terminate_gl );
 
     mGLData.width = SCREEN_WIDTH;
     mGLData.height = SCREEN_HEIGHT;
 
-    currentWindowOrientation = Dali::WindowOrientation::NO_ORIENTATION_PREFERENCE;
+    //currentWindowOrientation = Dali::WindowOrientation::NO_ORIENTATION_PREFERENCE;
 
     mGLWindow.Show();
 
     mGLWindow.ResizeSignal().Connect( this,  &HelloWorldController::OnGLWindowResize );
 
-    Dali::Vector<Dali::WindowOrientation> glWindowOrientations;
-    glWindowOrientations.PushBack( Dali::WindowOrientation::PORTRAIT );
-    glWindowOrientations.PushBack( Dali::WindowOrientation::LANDSCAPE );
-    glWindowOrientations.PushBack( Dali::WindowOrientation::PORTRAIT_INVERSE );
-    glWindowOrientations.PushBack( Dali::WindowOrientation::LANDSCAPE_INVERSE );
-    mGLWindow.SetAvailableOrientations( glWindowOrientations );
+    //Dali::Vector<Dali::WindowOrientation> glWindowOrientations;
+    //glWindowOrientations.PushBack( Dali::WindowOrientation::PORTRAIT );
+    //glWindowOrientations.PushBack( Dali::WindowOrientation::LANDSCAPE );
+    //glWindowOrientations.PushBack( Dali::WindowOrientation::PORTRAIT_INVERSE );
+    //glWindowOrientations.PushBack( Dali::WindowOrientation::LANDSCAPE_INVERSE );
+    //mGLWindow.SetAvailableOrientations( glWindowOrientations );
     mGLWindow.TouchedSignal().Connect( this, &HelloWorldController::OnGLWindowTouch );
     mGLWindow.KeyEventSignal().Connect( this, &HelloWorldController::OnGLWindowKeyEvent );
-
-    mGLWindow.RenderOnce();
   }
 
   void OnWindowResize( Dali::Window winHandle, Dali::Window::WindowSize size )
@@ -679,6 +1117,7 @@ public:
     int width = size.GetWidth();
     int height = size.GetHeight();
     mTextLabel.SetProperty( Actor::Property::SIZE, Vector2(width, 200) );
+    //view_set_ortho( mGLData.view, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0 );
     DALI_LOG_ERROR("OnWindowResized, current orientation:%d, width:%d, height:%d\n", DevelWindow::GetCurrentOrientation(winHandle), width, height );
   }
 
@@ -719,34 +1158,19 @@ public:
 
   void OnGLWindowTouch( const TouchEvent& touch )
   {
-    static int flag = 0;
-     DALI_LOG_ERROR("touch.GetState(), %d, flag: %d\n",touch.GetState( 0 ), flag);
-     static bool touched = false;
-     if(touch.GetState(0) == PointState::DOWN)
-     {
-       touched = true;
-     }
-     // quit the application
-     //mApplication.Quit();
-     if(touch.GetState(0) == PointState::UP && touched)
-     {
-         mApplication.Quit();
-         return;
-#if 1
-      if( flag == 1 )
-      {
-          DALI_LOG_ERROR("OnGLWindowTouch: ON_DEMAND \n");
-          mGLWindow.SetRenderingMode( Dali::GlWindow::RenderingMode::ON_DEMAND );
-          //flag = 0;
-          mGLWindow.RenderOnce();
-      }
-      else
-      {
-          DALI_LOG_ERROR("OnGLWindowTouch: CONTINUOUS \n");
-          mGLWindow.SetRenderingMode( Dali::GlWindow::RenderingMode::CONTINUOUS );
-          flag = 1;
-      }
-#else
+     DALI_LOG_ERROR("touch.GetState(), %d\n",touch.GetState( 0 ));
+    if( touch.GetState( 0 ) == 0 )
+    {
+      mGLData.mouse_down = true;
+      DALI_LOG_ERROR("DOWN, x:%f, y:%f\n",touch.GetScreenPosition( 0 ).x, touch.GetScreenPosition( 0 ).y);
+    }
+    else if( touch.GetState( 0 ) == 1 )
+    {
+      mGLData.mouse_down = false;
+      DALI_LOG_ERROR("UP, x:%f, y:%f\n",touch.GetScreenPosition( 0 ).x, touch.GetScreenPosition( 0 ).y);
+    }
+    else if( touch.GetState( 0 ) == 2 )
+    {
       float dx = 0;
       float dy = 0;
       mGLData.curPoint.x = touch.GetScreenPosition( 0 ).x;
@@ -761,7 +1185,6 @@ public:
       }
       mGLData.prevPoint.x = mGLData.curPoint.x;
       mGLData.prevPoint.y = mGLData.curPoint.y;
-#endif
     }
     return;
   }
@@ -771,29 +1194,12 @@ public:
     if(event.GetState() == KeyEvent::DOWN)
     {
       //if ( IsKey( event, Dali::DALI_KEY_ESCAPE ) || IsKey( event, Dali::DALI_KEY_BACK ) )
-
       if(event.GetKeyName() == "1")
       {
-         DALI_LOG_ERROR("OnGLWindowKeyEvent, key name: 1\n" );
         Window window = mApplication.GetWindow();
         window.Hide();
         //mApplication.Quit();
         //mUIWindow.Raise();
-      }
-      else if(event.GetKeyName() == "2")
-      {
-        DALI_LOG_ERROR("OnGLWindowKeyEvent, key name: 2\n" );
-        mGLWindow.RenderOnce();
-      }
-      else if(event.GetKeyName() == "3")
-      {
-        DALI_LOG_ERROR("OnGLWindowKeyEvent, key name: 3\n" );
-        mGLWindow.SetRenderingMode( Dali::GlWindow::RenderingMode::CONTINUOUS );
-      }
-      else if(event.GetKeyName() == "4")
-      {
-        DALI_LOG_ERROR("OnGLWindowKeyEvent, key name: 4\n" );
-        mGLWindow.SetRenderingMode( Dali::GlWindow::RenderingMode::ON_DEMAND );
       }
     }
   }
@@ -801,10 +1207,9 @@ public:
 private:
   Application&    mApplication;
   Dali::Window    mUIWindow;
-  Dali::GlWindow  mGLWindow;
   TextLabel       mTextLabel;
 
-  Dali::WindowOrientation currentWindowOrientation;
+  //Dali::WindowOrientation currentWindowOrientation;
 };
 
 int DALI_EXPORT_API main( int argc, char **argv )
@@ -814,141 +1219,3 @@ int DALI_EXPORT_API main( int argc, char **argv )
   application.MainLoop();
   return 0;
 }
-
-
-
-
-#else
-
-
-
-
-#include <dali-toolkit/dali-toolkit.h>
-#include <dali/integration-api/debug.h>
-#include <dali/devel-api/adaptor-framework/window-devel.h>
-
-using namespace Dali;
-using Dali::Toolkit::TextLabel;
-
-// This example shows how to create and display Hello World! using a simple TextActor
-//
-class HelloWorldController : public ConnectionTracker
-{
-public:
-  HelloWorldController(Application& application)
-  : mApplication(application)
-  {
-    // Connect to the Application's Init signal
-    mApplication.InitSignal().Connect(this, &HelloWorldController::Create);
-
-    mApplication.PauseSignal().Connect(this, &HelloWorldController::PauseCallback);
-  }
-
-  ~HelloWorldController() = default; // Nothing to do in destructor
-
-  // The Init signal is received once (only) during the Application lifetime
-  void Create(Application& application)
-  {
-    // Get a handle to the window
-    Window window = application.GetWindow();
-    window.SetBackgroundColor(Color::WHITE);
-#if 0
-#if 1
-    Dali::Vector< Dali::Window::WindowOrientation> orientations;
-    orientations.PushBack( Dali::Window::LANDSCAPE );
-    orientations.PushBack( Dali::Window::PORTRAIT );
-    orientations.PushBack( Dali::Window::LANDSCAPE_INVERSE );
-    orientations.PushBack( Dali::Window::PORTRAIT_INVERSE );
-    DevelWindow::SetAvailableOrientations( window, orientations );
-#else
-    window.AddAvailableOrientation(Dali::Window::LANDSCAPE);
-    window.AddAvailableOrientation(Dali::Window::PORTRAIT);
-    window.AddAvailableOrientation(Dali::Window::LANDSCAPE_INVERSE);
-    window.AddAvailableOrientation(Dali::Window::PORTRAIT_INVERSE);
-#endif
-#endif
-    TextLabel textLabel = TextLabel::New("First App");
-    textLabel.SetProperty(Actor::Property::ANCHOR_POINT, AnchorPoint::TOP_LEFT);
-    textLabel.SetProperty(Dali::Actor::Property::NAME, "First App");
-    window.Add(textLabel);
-
-    // Respond to a touch anywhere on the window
-    window.GetRootLayer().TouchedSignal().Connect(this, &HelloWorldController::OnTouch);
-
-    // Respond to key events
-    window.KeyEventSignal().Connect(this, &HelloWorldController::OnKeyEvent);
-
-    mResizeAnimaition1 = Animation::New(0.0f);
-
-    Vector3 mSize1 = Vector3( 300.0f, 300.0f, 0.0f );
-    mResizeAnimaition1.SetLoopingMode( Animation::AUTO_REVERSE );
-    mResizeAnimaition1.Stop();
-    mResizeAnimaition1.Clear();
-    mResizeAnimaition1.AnimateTo( Property( textLabel, Actor::Property::POSITION ), mSize1, AlphaFunction::LINEAR,  TimePeriod( 5.0f ) );
-    mResizeAnimaition1.SetLooping( true );
-    mResizeAnimaition1.Play();
-  }
-
-  void PauseCallback(Application& app)
-  {
-    DALI_LOG_ERROR("PauseCallback: call app.Quit()\n ");
-  }
-
-  bool OnTouch(Actor actor, const TouchEvent& touch)
-  {
-    static bool flag = false;
-    static bool touched = false;
-    if(touch.GetState(0) == PointState::DOWN)
-    {
-      touched = true;
-    }
-    // quit the application
-    //mApplication.Quit();
-    if(touch.GetState(0) == PointState::UP && touched)
-    {
-        if (flag == true )
-        {
-          DALI_LOG_ERROR("OnKeyEvent()!!! pressed 1 button(100x100)\n");
-          Window window = mApplication.GetWindow();
-          DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 400, 400 ));
-          flag = false;
-        }
-        else
-        {
-          DALI_LOG_ERROR("OnKeyEvent()!!! pressed 2 button(200x200)\n");
-          Window window = mApplication.GetWindow();
-          DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 200, 200 ));
-          flag = true;
-        }
-        touched = false;
-    }
-    return true;
-  }
-
-  void OnKeyEvent(const KeyEvent& event)
-  {
-    if(event.GetState() == KeyEvent::DOWN)
-    {
-      if(IsKey(event, Dali::DALI_KEY_ESCAPE) || IsKey(event, Dali::DALI_KEY_BACK))
-      {
-        Window window = mApplication.GetWindow();
-        window.Hide();
-        mApplication.Quit();
-      }
-    }
-  }
-
-private:
-  Application& mApplication;
-  Animation     mResizeAnimaition1;
-};
-
-int DALI_EXPORT_API main(int argc, char** argv)
-{
-  Application          application = Application::New(&argc, &argv);
-  HelloWorldController test(application);
-  application.MainLoop();
-  return 0;
-}
-
-#endif
