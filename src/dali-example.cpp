@@ -14,6 +14,751 @@
  * limitations under the License.
  *
  */
+
+#if 0
+
+//This sample initialise evas_gl, creates shader, native-buffer and draws rotating box with generated textures contained simple text.
+//NOTE: extension GL_OES_EGL_image_external is required in order to fully get effect from API.
+#include <app.h>
+#include <tizen.h>
+#include <Elementary.h>
+#include <Evas_GL.h>
+#include <Ecore_Evas.h>
+#include <Evas.h>
+#include <signal.h>
+#include <tbm_surface.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <efl_extension.h>
+#include <math.h>
+#include <dlog.h>
+#include <system_settings.h>
+
+#define INF(fmt, arg...) ALOGI(fmt, ##arg)
+#ifdef  LOG_TAG
+#undef  LOG_TAG
+#endif
+#define LOG_TAG "evas_sample_app_5th"
+
+#define ONEP +1.0f
+#define ONEN -1.0f
+#define ZERO 0.0f
+
+static int WIDTH = 0;
+static int HEIGHT = 0;
+static Evas_GL *evasgl;
+static Evas_GL_Surface *surface;
+static Evas_GL_Config *config;
+static Evas_Object *window;
+static Evas_Object *image;
+static Evas_Object* box;
+static Evas_GL_API *glapi;
+static Evas_GL_Context *context;
+static Eina_Bool isGL_OES_EGL_exist = EINA_TRUE;
+
+unsigned int program = 0;
+unsigned int vtx_shader = 0;
+unsigned int fgmt_shader = 0;
+static unsigned int foregroundColor = 0xff0044ff;
+static unsigned int backgroundColor = 0xff8844ff;
+
+GLint idxVPosition;
+GLint idxVTexCoord;
+GLuint idxVBO_BOX;
+GLuint idxTBO;
+GLint idxMVP;
+GLint idxMVP2;
+GLint idxModelVeiw;
+GLint idxfogColor;
+
+float view[4][4];
+float matPerspective[4][4];
+float matModelview[4][4];
+const float PI = 3.1415926535897932384626433832795f;
+short _x;
+short _y;
+short _x1;
+short _x2;
+short _y1;
+short _y2;
+
+typedef struct nativeBufferTexture
+{
+    tbm_surface_h buffer;
+    GLuint renderedTexture;
+    unsigned int nativeBufferWidth;
+    unsigned int nativeBufferHeight;
+    EvasGLImage evglImg;
+    int stride;
+    unsigned char *ptr;
+} nativeBufferTexture_s;
+
+static nativeBufferTexture_s nativeTexture;
+
+static const float VERTICES_BOX[] =
+{
+    ONEN, ONEN, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEP, ONEP, ONEP,
+    ONEN, ONEN, ONEN, ONEN, ONEP, ONEN, ONEP, ONEN, ONEN, ONEP, ONEP, ONEN,
+    ONEN, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN, ONEN, ONEN, ONEN, ONEP, ONEN,
+    ONEP, ONEN, ONEN, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEP, ONEP,
+    ONEN, ONEP, ONEP, ONEP, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN,
+    ONEN, ONEN, ONEP, ONEN, ONEN, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN, ONEN
+};
+
+static const float TEXTURE_COORD[] =
+{
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP
+};
+
+static const char VERTEX_TEXT[] =
+    "attribute vec3 a_position;\n"
+    "attribute vec2 a_texcoord;\n"
+    "uniform mat4 u_mvpMatrix;\n"
+    "uniform mat4 u_modelMatrix;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main()\n"
+    "{\n"
+    "	v_texcoord = a_texcoord;\n"
+    "	vec3 pos = vec3( u_modelMatrix * vec4(a_position, 1.0) );\n"
+    "	fogFactor = clamp( ( 6.5 - length(pos) ) / 2.5, 0.0, 1.0);\n"
+    "	gl_Position = u_mvpMatrix * vec4(a_position, 1.0);\n"
+    "}\n";
+
+static const char FRAGMENT_TEXT[] =
+    "#ifdef GL_ES\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "uniform sampler2D uTexture;\n"
+    "uniform vec4 u_fogColor;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main (void)\n"
+    "{\n"
+    "	vec4 resColor;\n"
+    "	resColor =  vec4(texture2D(uTexture, vec2(1,1) - v_texcoord).rgb, 1.0);\n"
+    "	gl_FragColor = mix( u_fogColor, resColor, fogFactor );\n"
+    "}\n";
+
+static const char FRAGMENT_TEXT_GL_OES_EGL_IMAGE[] =
+    "#extension GL_OES_EGL_image_external : require\n"
+    "#ifdef GL_ES\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "uniform samplerExternalOES uTexture;\n"
+    "uniform vec4 u_fogColor;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main (void)\n"
+    "{\n"
+    "	vec4 resColor;\n"
+    "	resColor =  vec4(texture2D(uTexture, vec2(1,1) - v_texcoord).rgb, 1.0);\n"
+    "	gl_FragColor = mix( u_fogColor, resColor, fogFactor );\n"
+    "}\n";
+
+
+static void
+init_matrix(float matrix[16])
+{
+    matrix[0] = 1.0f;
+    matrix[1] = 0.0f;
+    matrix[2] = 0.0f;
+    matrix[3] = 0.0f;
+
+    matrix[4] = 0.0f;
+    matrix[5] = 1.0f;
+    matrix[6] = 0.0f;
+    matrix[7] = 0.0f;
+
+    matrix[8] = 0.0f;
+    matrix[9] = 0.0f;
+    matrix[10] = 1.0f;
+    matrix[11] = 0.0f;
+
+    matrix[12] = 0.0f;
+    matrix[13] = 0.0f;
+    matrix[14] = 0.0f;
+    matrix[15] = 1.0f;
+}
+
+static void
+multiply_matrix(float matrix[16], const float matrix0[16], const float matrix1[16])
+{
+    int i;
+    int row;
+    int column;
+    float temp[16];
+
+    for (column = 0; column < 4; column++) {
+        for (row = 0; row < 4; row++) {
+                temp[(column * 4) + row] = 0.0f;
+
+                for (i = 0; i < 4; i++)
+                    temp[(column * 4) + row] += matrix0[(i * 4) + row] * matrix1[(column * 4) + i];
+            }
+    }
+
+    for (i = 0; i < 16; i++)
+        matrix[i] = temp[i];
+}
+
+void
+Frustum(float matrix[4][4], float left, float right, float bottom, float top, float near, float far)
+{
+    float diffX = right - left;
+    float diffY = top - bottom;
+    float diffZ = far - near;
+
+    if ((near <= 0.0f) || (far <= 0.0f) ||
+        (diffX <= 0.0f) || (diffY <= 0.0f) || (diffZ <= 0.0f)) {
+        return;
+    }
+
+    matrix[0][0] = 2.0f * near / diffX;
+    matrix[1][1] = 2.0f * near / diffY;
+    matrix[2][0] = (right + left) / diffX;
+    matrix[2][1] = (top + bottom) / diffY;
+    matrix[2][2] = -(near + far) / diffZ;
+    matrix[2][3] = -1.0f;
+    matrix[3][2] = -2.0f * near * far / diffZ;
+
+    matrix[0][1] = matrix[0][2] = matrix[0][3] = 0.0f;
+    matrix[1][0] = matrix[1][2] = matrix[1][3] = 0.0f;
+    matrix[3][0] = matrix[3][1] = matrix[3][3] = 0.0f;
+}
+
+void
+Perspective(float pResult[4][4], float fovY, float aspect, float near, float far)
+{
+    float fovRadian = fovY / 360.0f * PI;
+    float top = tanf(fovRadian) * near;
+    float right = top * aspect;
+
+    Frustum(pResult, -right, right, -top, top, near, far);
+}
+
+void
+Translate(float pResult[4][4], float tx, float ty, float tz)
+{
+    pResult[3][0] += (pResult[0][0] * tx + pResult[1][0] * ty + pResult[2][0] * tz);
+    pResult[3][1] += (pResult[0][1] * tx + pResult[1][1] * ty + pResult[2][1] * tz);
+    pResult[3][2] += (pResult[0][2] * tx + pResult[1][2] * ty + pResult[2][2] * tz);
+    pResult[3][3] += (pResult[0][3] * tx + pResult[1][3] * ty + pResult[2][3] * tz);
+}
+
+void
+Rotate(float pResult[4][4], float angle, float x, float y, float z)
+{
+    float rotate[4][4];
+
+    float cos = cosf(angle * PI / 180.0f);
+    float sin = sinf(angle * PI / 180.0f);
+    float cos1 = 1.0f - cos;
+
+    float len = sqrtf(x*x + y*y + z*z);
+
+    x = x / len;
+    y = y / len;
+    z = z / len;
+
+    rotate[0][0] = (x * x) * cos1 + cos;
+    rotate[0][1] = (x * y) * cos1 - z * sin;
+    rotate[0][2] = (z * x) * cos1 + y * sin;
+    rotate[0][3] = 0.0f;
+
+    rotate[1][0] = (x * y) * cos1 + z * sin;
+    rotate[1][1] = (y * y) * cos1 + cos;
+    rotate[1][2] = (y * z) * cos1 - x * sin;
+    rotate[1][3] = 0.0f;
+
+    rotate[2][0] = (z * x) * cos1 - y * sin;
+    rotate[2][1] = (y * z) * cos1 + x * sin;
+    rotate[2][2] = (z * z) * cos1 + cos;
+
+    rotate[2][3] = rotate[3][0] = rotate[3][1] = rotate[3][2] = 0.0f;
+    rotate[3][3] = 1.0f;
+
+    multiply_matrix((float*)pResult, (float*)pResult, (float*)rotate);
+}
+
+const unsigned char FONT8x8[97][8] = {
+    { 0x08,0x08,0x08,0x00,0x00,0x00,0x00,0x00 }, // columns, rows, num_bytes_per_char
+    { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, // space 0x20
+    { 0x30,0x78,0x78,0x30,0x30,0x00,0x30,0x00 }, // !
+    { 0x6C,0x6C,0x6C,0x00,0x00,0x00,0x00,0x00 }, // "
+    { 0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00 }, // #
+    { 0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00 }, // $
+    { 0x00,0x63,0x66,0x0C,0x18,0x33,0x63,0x00 }, // %
+    { 0x1C,0x36,0x1C,0x3B,0x6E,0x66,0x3B,0x00 }, // &
+    { 0x30,0x30,0x60,0x00,0x00,0x00,0x00,0x00 }, // '
+    { 0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00 }, // (
+    { 0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00 }, // )
+    { 0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00 }, // *
+    { 0x00,0x30,0x30,0xFC,0x30,0x30,0x00,0x00 }, // +
+    { 0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30 }, // ,
+    { 0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00 }, // -
+    { 0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00 }, // .
+    { 0x03,0x06,0x0C,0x18,0x30,0x60,0x40,0x00 }, // / (forward slash)
+    { 0x3E,0x63,0x63,0x6B,0x63,0x63,0x3E,0x00 }, // 0 0x30
+    { 0x18,0x38,0x58,0x18,0x18,0x18,0x7E,0x00 }, // 1
+    { 0x3C,0x66,0x06,0x1C,0x30,0x66,0x7E,0x00 }, // 2
+    { 0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00 }, // 3
+    { 0x0E,0x1E,0x36,0x66,0x7F,0x06,0x0F,0x00 }, // 4
+    { 0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00 }, // 5
+    { 0x1C,0x30,0x60,0x7C,0x66,0x66,0x3C,0x00 }, // 6
+    { 0x7E,0x66,0x06,0x0C,0x18,0x18,0x18,0x00 }, // 7
+    { 0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00 }, // 8
+    { 0x3C,0x66,0x66,0x3E,0x06,0x0C,0x38,0x00 }, // 9
+    { 0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00 }, // :
+    { 0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30 }, // ;
+    { 0x0C,0x18,0x30,0x60,0x30,0x18,0x0C,0x00 }, // <
+    { 0x00,0x00,0x7E,0x00,0x00,0x7E,0x00,0x00 }, // =
+    { 0x30,0x18,0x0C,0x06,0x0C,0x18,0x30,0x00 }, // >
+    { 0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00 }, // ?
+    { 0x3E,0x63,0x6F,0x69,0x6F,0x60,0x3E,0x00 }, // @ 0x40
+    { 0x18,0x3C,0x66,0x66,0x7E,0x66,0x66,0x00 }, // A
+    { 0x7E,0x33,0x33,0x3E,0x33,0x33,0x7E,0x00 }, // B
+    { 0x1E,0x33,0x60,0x60,0x60,0x33,0x1E,0x00 }, // C
+    { 0x7C,0x36,0x33,0x33,0x33,0x36,0x7C,0x00 }, // D
+    { 0x7F,0x31,0x34,0x3C,0x34,0x31,0x7F,0x00 }, // E
+    { 0x7F,0x31,0x34,0x3C,0x34,0x30,0x78,0x00 }, // F
+    { 0x1E,0x33,0x60,0x60,0x67,0x33,0x1F,0x00 }, // G
+    { 0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00 }, // H
+    { 0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00 }, // I
+    { 0x0F,0x06,0x06,0x06,0x66,0x66,0x3C,0x00 }, // J
+    { 0x73,0x33,0x36,0x3C,0x36,0x33,0x73,0x00 }, // K
+    { 0x78,0x30,0x30,0x30,0x31,0x33,0x7F,0x00 }, // L
+    { 0x63,0x77,0x7F,0x7F,0x6B,0x63,0x63,0x00 }, // M
+    { 0x63,0x73,0x7B,0x6F,0x67,0x63,0x63,0x00 }, // N
+    { 0x3E,0x63,0x63,0x63,0x63,0x63,0x3E,0x00 }, // O
+    { 0x7E,0x33,0x33,0x3E,0x30,0x30,0x78,0x00 }, // P 0x50
+    { 0x3C,0x66,0x66,0x66,0x6E,0x3C,0x0E,0x00 }, // Q
+    { 0x7E,0x33,0x33,0x3E,0x36,0x33,0x73,0x00 }, // R
+    { 0x3C,0x66,0x30,0x18,0x0C,0x66,0x3C,0x00 }, // S
+    { 0x7E,0x5A,0x18,0x18,0x18,0x18,0x3C,0x00 }, // T
+    { 0x66,0x66,0x66,0x66,0x66,0x66,0x7E,0x00 }, // U
+    { 0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00 }, // V
+    { 0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00 }, // W
+    { 0x63,0x63,0x36,0x1C,0x1C,0x36,0x63,0x00 }, // X
+    { 0x66,0x66,0x66,0x3C,0x18,0x18,0x3C,0x00 }, // Y
+    { 0x7F,0x63,0x46,0x0C,0x19,0x33,0x7F,0x00 }, // Z
+    { 0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00 }, // [
+    { 0x60,0x30,0x18,0x0C,0x06,0x03,0x01,0x00 }, // \ (back slash)
+    { 0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00 }, // ]
+    { 0x08,0x1C,0x36,0x63,0x00,0x00,0x00,0x00 }, // ^
+    { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF }, // _
+    { 0x18,0x18,0x0C,0x00,0x00,0x00,0x00,0x00 }, // ` 0x60
+    { 0x00,0x00,0x3C,0x06,0x3E,0x66,0x3B,0x00 }, // a
+    { 0x70,0x30,0x3E,0x33,0x33,0x33,0x6E,0x00 }, // b
+    { 0x00,0x00,0x3C,0x66,0x60,0x66,0x3C,0x00 }, // c
+    { 0x0E,0x06,0x3E,0x66,0x66,0x66,0x3B,0x00 }, // d
+    { 0x00,0x00,0x3C,0x66,0x7E,0x60,0x3C,0x00 }, // e
+    { 0x1C,0x36,0x30,0x78,0x30,0x30,0x78,0x00 }, // f
+    { 0x00,0x00,0x3B,0x66,0x66,0x3E,0x06,0x7C }, // g
+    { 0x70,0x30,0x36,0x3B,0x33,0x33,0x73,0x00 }, // h
+    { 0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00 }, // i
+    { 0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C }, // j
+    { 0x70,0x30,0x33,0x36,0x3C,0x36,0x73,0x00 }, // k
+    { 0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00 }, // l
+    { 0x00,0x00,0x66,0x7F,0x7F,0x6B,0x63,0x00 }, // m
+    { 0x00,0x00,0x7C,0x66,0x66,0x66,0x66,0x00 }, // n
+    { 0x00,0x00,0x3C,0x66,0x66,0x66,0x3C,0x00 }, // o
+    { 0x00,0x00,0x6E,0x33,0x33,0x3E,0x30,0x78 }, // p
+    { 0x00,0x00,0x3B,0x66,0x66,0x3E,0x06,0x0F }, // q
+    { 0x00,0x00,0x6E,0x3B,0x33,0x30,0x78,0x00 }, // r
+    { 0x00,0x00,0x3E,0x60,0x3C,0x06,0x7C,0x00 }, // s
+    { 0x08,0x18,0x3E,0x18,0x18,0x1A,0x0C,0x00 }, // t
+    { 0x00,0x00,0x66,0x66,0x66,0x66,0x3B,0x00 }, // u
+    { 0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00 }, // v
+    { 0x00,0x00,0x63,0x6B,0x7F,0x7F,0x36,0x00 }, // w
+    { 0x00,0x00,0x63,0x36,0x1C,0x36,0x63,0x00 }, // x
+    { 0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x7C }, // y
+    { 0x00,0x00,0x7E,0x4C,0x18,0x32,0x7E,0x00 }, // z
+    { 0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00 }, // {
+    { 0x0C,0x0C,0x0C,0x00,0x0C,0x0C,0x0C,0x00 }, // |
+    { 0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00 }, // }
+    { 0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00 }, // ~
+    { 0x1C,0x36,0x36,0x1C,0x00,0x00,0x00,0x00 } // DEL
+    };
+
+static void
+characterWindow(int x, int y, int w, int h)
+{
+    // current pixel location
+    _x = x;
+    _y = y;
+    // characterWindow settings
+    _x1 = x;
+    _x2 = x + w - 1;
+    _y1 = y;
+    _y2 = y + h - 1;
+}
+
+static void
+putp(nativeBufferTexture_s *ns, int colour)
+{
+    unsigned int *_p;
+    _p = (unsigned int *)(((unsigned char *)ns->ptr) + (_y * ns->stride));
+    _p[_x] = colour;
+
+    _x++;
+    if(_x > _x2) {
+        _x = _x1;
+        _y++;
+        if(_y > _y2) {
+            _y = _y1;
+        }
+    }
+}
+
+static void
+blitbit(nativeBufferTexture_s *ns, int x, int y, int w, int h, const char* colour)
+{
+    int i;
+    characterWindow(x, y, w, h);
+    for(i = 0; i < w*h; i++) {
+        char byte = colour[i >> 3];
+        int offset = i & 0x7;
+        int c = ((byte << offset) & 0x80) ? foregroundColor : backgroundColor;
+        putp(ns, c);
+    }
+}
+
+static void
+character(nativeBufferTexture_s *ns, int column, int row, int value)
+{
+    blitbit(ns, column * 8, row * 8, 8, 8, (char*)&(FONT8x8[value - 0x1F][0]));
+}
+
+static void
+updateNativeTexture(nativeBufferTexture_s *nativeTexture, unsigned int column, unsigned int row, char *str)
+{
+    int x, y;
+    unsigned int *_p;
+    tbm_surface_info_s surface_info;
+
+    tbm_surface_map(nativeTexture->buffer, TBM_SURF_OPTION_READ|TBM_SURF_OPTION_WRITE, &surface_info);
+
+    if (surface_info.num_planes != 0)
+    {
+        nativeTexture->ptr = surface_info.planes[0].ptr;
+        nativeTexture->stride = surface_info.planes[0].stride;
+
+        for (y = 0; y < nativeTexture->nativeBufferHeight; y++) {
+            _p = (unsigned int *)(((unsigned char *)nativeTexture->ptr) + (y * nativeTexture->stride));
+            for (x = 0; x < nativeTexture->nativeBufferWidth; x++) {
+                _p[x] = backgroundColor;
+            }
+        }
+
+        while (*str != '\0') {
+            character(nativeTexture, column++, row, (int)*str++);
+        }
+    }
+
+    tbm_surface_unmap(nativeTexture->buffer);
+}
+
+static void
+render_cb(void *data, Evas_Object *obj)
+{
+    static unsigned int counter = 0;
+    static int once = 0;
+    static int angle = 0;
+    static double hue = 0.0;
+    int i;
+    tbm_format *formats;
+    tbm_format format = TBM_FORMAT_ARGB8888;
+    uint32_t formats_count;
+    Evas_Coord w, h;
+
+    evas_object_image_size_get(obj, &w, &h);
+    evas_gl_make_current(evasgl, surface, context);
+    if (!once) {
+        once = 1;
+        int attrib[] = {EVAS_GL_IMAGE_PRESERVED, GL_TRUE ,EVAS_GL_NONE, EVAS_GL_NONE};
+        angle = 0.0f;
+        const char *p;
+        p = VERTEX_TEXT;
+        vtx_shader = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vtx_shader, 1, &p, NULL);
+        glCompileShader(vtx_shader);
+        const GLubyte *ext = glGetString(GL_EXTENSIONS);
+        if (strstr((const char*)ext, "GL_OES_EGL_image_external") == NULL) {
+            printf( "GL_OES_EGL_image_external is required in order to fully get effect from API. %i", __LINE__);
+            isGL_OES_EGL_exist = EINA_FALSE;
+            counter = 600;
+        }
+        p = (isGL_OES_EGL_exist) ? FRAGMENT_TEXT_GL_OES_EGL_IMAGE : FRAGMENT_TEXT;
+        fgmt_shader = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fgmt_shader, 1, &p, NULL);
+        glCompileShader(fgmt_shader);
+
+        program = glCreateProgram();
+        glAttachShader(program, vtx_shader);
+        glAttachShader(program, fgmt_shader);
+        glLinkProgram(program);
+
+        idxVPosition = glGetAttribLocation(program, "a_position");
+        idxVTexCoord = glGetAttribLocation(program, "a_texcoord");
+        idxMVP = glGetUniformLocation(program, "u_mvpMatrix");
+        idxModelVeiw = glGetUniformLocation(program, "u_modelMatrix");
+        idxfogColor = glGetUniformLocation(program, "u_fogColor");
+
+        glGenBuffers(1, &idxVBO_BOX);
+        glBindBuffer(GL_ARRAY_BUFFER, idxVBO_BOX);
+        glBufferData(GL_ARRAY_BUFFER, 12*6*sizeof(float), VERTICES_BOX, GL_STATIC_DRAW);
+
+        glGenBuffers(1, &idxTBO);
+        glBindBuffer(GL_ARRAY_BUFFER, idxTBO);
+        glBufferData(GL_ARRAY_BUFFER, 6*8*sizeof(float), TEXTURE_COORD, GL_STATIC_DRAW);
+
+        nativeTexture.nativeBufferWidth = 70;
+        nativeTexture.nativeBufferHeight = 50;
+
+        tbm_surface_query_formats(&formats, &formats_count);
+        for (i = 0; i < formats_count; i++)
+        {
+            if (formats[i] == TBM_FORMAT_BGRA8888)
+                format = TBM_FORMAT_BGRA8888;
+        }
+
+        nativeTexture.buffer = tbm_surface_create(nativeTexture.nativeBufferWidth, nativeTexture.nativeBufferHeight, format);
+
+        updateNativeTexture(&nativeTexture, 1, 3, "Tizen");
+
+        glGenTextures(1, &nativeTexture.renderedTexture);
+
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, nativeTexture.renderedTexture);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        nativeTexture.evglImg = evasglCreateImage(EVAS_GL_NATIVE_SURFACE_TIZEN, (void*)nativeTexture.buffer, attrib);
+        glEvasGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, nativeTexture.evglImg);
+        if (!isGL_OES_EGL_exist) {
+            elm_object_scale_set((Evas_Object *)data, 0.45);
+            elm_object_text_set((Evas_Object *)data, "GL_OES_EGL_image_external not supported under emul");
+            printf( "GL_OES_EGL_image_external is required in order to fully get effect from API. %i", __LINE__);
+        }
+
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glEnable(GL_DEPTH_TEST);
+
+        init_matrix((float*)view);
+        init_matrix((float*)matPerspective);
+        Perspective(matPerspective, 60.0f, (float)w/(float)h, 1.0f, 400.0f);
+    }
+
+    angle += 1.0f;
+
+    if (angle >= 360.0f) {
+        angle -= 360.0f;
+    }
+
+    angle = (angle + 1) % (360 * 3);
+
+    float r = (1.0f + sin(hue - 2.0 * PI / 3.0)) / 3.0f;
+    float g = (1.0f + sin(hue)) / 3.0f;
+    float b = (1.0f + sin(hue + 2.0 * PI / 3.0)) / 3.0f;
+
+    hue += 0.03;
+
+    glUseProgram(program);
+    glUniform4f(idxfogColor, r, g, b, 1.0f);
+    glViewport(0, 0, w, h);
+    glClearColor(r, g, b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    init_matrix((float*)matModelview);
+    Translate(matModelview, 0.0f, 0.0, -6.0);
+
+    Rotate(matModelview, -(float)angle / 3.0f, 0.0, 0.0, 1.0);
+    Rotate(matModelview, -angle, 0.0, 1.0, 0.0);
+
+    multiply_matrix((float*)view, (float*)matPerspective, (float*)matModelview);
+    glUniformMatrix4fv(idxModelVeiw, 1, GL_FALSE, (GLfloat*)(float*)matModelview);
+    glUniformMatrix4fv(idxMVP, 1, GL_FALSE, (GLfloat*)view);
+    glEnable( GL_TEXTURE_2D );
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, nativeTexture.renderedTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glBindBuffer(GL_ARRAY_BUFFER, idxVBO_BOX);
+    glVertexAttribPointer(idxVPosition, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+    glEnableVertexAttribArray(idxVPosition);
+    glBindBuffer(GL_ARRAY_BUFFER, idxTBO);
+    glVertexAttribPointer(idxVTexCoord, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
+    glEnableVertexAttribArray(idxVTexCoord);
+
+    for(i = 0; i < 6 ; i++) {
+        glDrawArrays(GL_TRIANGLE_STRIP, 4 * i, 4);
+    }
+
+    glDisableVertexAttribArray(idxVPosition);
+    glDisableVertexAttribArray(idxVTexCoord);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    glFinish();
+
+    counter++;
+    if (counter%100 == 0) {
+        updateNativeTexture(&nativeTexture, 1, 3, "EvasGL");
+    }
+    if (counter%200 == 0) {
+        updateNativeTexture(&nativeTexture, 1, 3, "Tizen");
+    }
+    if (isGL_OES_EGL_exist && counter > 600) {
+        ui_app_exit();
+    }
+}
+
+static Eina_Bool
+_animator_cb(void *data)
+{
+    Evas_Object *img = (Evas_Object*)data;
+    evas_object_image_pixels_dirty_set(img, EINA_TRUE);
+    return ECORE_CALLBACK_RENEW;
+}
+
+static void
+win_back_cb(void *data, Evas_Object *obj, void *event_info)
+{
+    /* Let window go to hide state. */
+    elm_win_lower(window);
+}
+
+static void
+app_del_cb(void *data, Evas *e , Evas_Object *obj , void *event_info)
+{
+    Ecore_Animator *ani = evas_object_data_get(image, "animator");
+    ecore_animator_del(ani);
+    evas_gl_make_current(evasgl, surface, context);
+    tbm_surface_destroy (nativeTexture.buffer);
+    evasglDestroyImage(nativeTexture.evglImg);
+    glDeleteShader(vtx_shader);
+    glDeleteShader(fgmt_shader);
+    glDeleteProgram(program);
+    glDeleteBuffers(1, &idxTBO);
+    glDeleteBuffers(1, &idxVBO_BOX);
+    glDeleteTextures(1, &nativeTexture.renderedTexture);
+    evas_gl_surface_destroy(evasgl, surface);
+    evas_gl_context_destroy(evasgl, context);
+    evas_gl_config_free(config);
+    elm_box_clear(box);
+    evas_gl_free(evasgl);
+}
+
+static void
+win_resize_cb(void *data, Evas *e , Evas_Object *obj , void *event_info)
+{
+    if(surface) {
+        evas_object_image_native_surface_set(image, NULL);
+        evas_gl_surface_destroy(evasgl, surface);
+        surface = NULL;
+    }
+
+    Evas_Coord w,h;
+    evas_object_geometry_get(obj, NULL, NULL, &w, &h);
+    evas_object_image_size_set(image, w, h);
+    evas_object_resize(image, w, h);
+    evas_object_show(image);
+
+    if(!surface) {
+        Evas_Native_Surface ns;
+        surface = evas_gl_surface_create(evasgl, config, w, h);
+        evas_gl_native_surface_get(evasgl, surface, &ns);
+        evas_object_image_native_surface_set(image, &ns);
+        evas_object_image_pixels_dirty_set(image, EINA_TRUE);
+    }
+}
+
+static bool
+app_create(void *data)
+{
+    Evas_Native_Surface ns;
+    elm_config_accel_preference_set("opengl");
+    window = elm_win_util_standard_add("evas_gl_complex_test_5th", "evas_gl_complex_test_5th");
+
+    evas_object_geometry_get(window, NULL, NULL, &WIDTH, &HEIGHT);
+    evas_object_color_set(window, 255, 255, 255, 255);
+    evas_object_resize(window, WIDTH, HEIGHT);
+    evas_object_show(window);
+
+    evasgl = evas_gl_new(evas_object_evas_get(window));
+    glapi = evas_gl_api_get(evasgl);
+
+    config = evas_gl_config_new();
+    config->color_format = EVAS_GL_RGBA_8888;
+    config->depth_bits = EVAS_GL_DEPTH_BIT_24;
+    config->stencil_bits = EVAS_GL_STENCIL_NONE;
+    config->options_bits = EVAS_GL_OPTIONS_DIRECT;
+    config->gles_version = EVAS_GL_GLES_2_X;
+    surface = evas_gl_surface_create(evasgl, config, WIDTH, HEIGHT);
+
+    context = evas_gl_context_version_create(evasgl, NULL, EVAS_GL_GLES_2_X);
+    glapi = evas_gl_context_api_get(evasgl, context);
+
+    image = evas_object_image_filled_add(evas_object_evas_get(window));
+    evas_object_image_size_set(image, WIDTH, HEIGHT);
+
+    evas_gl_native_surface_get(evasgl, surface, &ns);
+    evas_object_image_native_surface_set(image, &ns);
+    evas_object_event_callback_add(window, EVAS_CALLBACK_RESIZE, win_resize_cb, NULL);
+
+    box = elm_box_add(window);
+    evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+    elm_win_resize_object_add(window, box);
+    evas_object_show(box);
+
+    Evas_Object* btn = elm_label_add(window);
+    elm_box_pack_end(box, btn);
+    evas_object_show(btn);
+
+    evas_object_image_pixels_get_callback_set(image, render_cb, (void*) btn);
+    evas_object_event_callback_add(image, EVAS_CALLBACK_DEL, app_del_cb, NULL);
+
+    evas_object_resize(image, WIDTH, HEIGHT);
+    evas_object_show(image);
+
+    Ecore_Animator *ani = ecore_animator_add(_animator_cb, image);
+    evas_object_data_set(image, "animator", ani);
+    evas_gl_make_current(evasgl, surface, context);
+
+    eext_object_event_callback_add(window, EEXT_CALLBACK_BACK, win_back_cb, NULL);
+
+    if (evas_gl_error_get(evasgl) != EVAS_GL_SUCCESS)
+        dlog_print(DLOG_ERROR, LOG_TAG, "evas_gl_error_get() is failed. %i", __LINE__);
+
+    return true;
+}
+
+int
+main(int argc, char *argv[])
+{
+    int ret = 0;
+
+    ui_app_lifecycle_callback_s event_callback = {0,};
+
+    event_callback.create = app_create;
+
+    ret = ui_app_main(argc, argv, &event_callback, NULL);
+    if (ret != APP_ERROR_NONE) {
+        dlog_print(DLOG_ERROR, LOG_TAG, "app_main() is failed. err = %d", ret);
+    }
+
+    return ret;
+}
+
+
+#else
+
 #define LOG_TAG "DALI_NATIVEGL_LIBRARY"
 
 
@@ -92,22 +837,6 @@ typedef struct GLDATA
     ////////////////////////////////////////////////////////////////////////
     // OnScreen
 
-    GLuint onscreen_programObject;
-
-    // Attribute locations
-    GLint  positionLoc;
-    GLint  texCoordLoc;
-
-    // Sampler location
-    GLint samplerLoc;
-
-    GLint mvpLoc;
-    // Texture handle
-    GLuint textureId;
-
-    matrix_t perspective;
-    matrix_t mvp_matrix;
-
     ////////////////////////////////////////////////////////////////////////
     /// egl Image Extension
     ///
@@ -122,20 +851,7 @@ typedef struct GLDATA
     tbm_surface_queue_h mTbmSurfaceQueue;
     tbm_surface_h mCurrentSurface;
 
-    /// Window handle
-    EGLNativeWindowType  hWnd;
 
-    /// EGL display
-    EGLDisplay  eglDisplay;
-
-    /// EGL context
-    EGLContext  eglContext;
-
-    /// EGL surface
-    EGLSurface  eglSurface;
-
-    /// Offscreen program object
-    GLuint offscreen_programObject;
 
     bool IsCreatedEGLImage;
     bool IsCreatedSyncObject;
@@ -144,884 +860,614 @@ typedef struct GLDATA
 static GLData mGLData;
 
 
+#define INF(fmt, arg...) ALOGI(fmt, ##arg)
+#ifdef  LOG_TAG
+#undef  LOG_TAG
+#endif
+#define LOG_TAG "evas_sample_app_5th"
 
+#define ONEP +1.0f
+#define ONEN -1.0f
+#define ZERO 0.0f
+
+static bool isGL_OES_EGL_exist = true;
+
+unsigned int program = 0;
+unsigned int vtx_shader = 0;
+unsigned int fgmt_shader = 0;
+static unsigned int foregroundColor = 0xff0044ff;
+static unsigned int backgroundColor = 0xff8844ff;
+
+GLint idxVPosition;
+GLint idxVTexCoord;
+GLuint idxVBO_BOX;
+GLuint idxTBO;
+GLint idxMVP;
+GLint idxMVP2;
+GLint idxModelVeiw;
+GLint idxfogColor;
+
+float view[4][4];
+float matPerspective[4][4];
+float matModelview[4][4];
+const float PI = 3.1415926535897932384626433832795f;
+short _x;
+short _y;
+short _x1;
+short _x2;
+short _y1;
+short _y2;
+int g_angle = 0;
+
+typedef struct nativeBufferTexture
+{
+    tbm_surface_h buffer;
+    GLuint renderedTexture;
+    unsigned int nativeBufferWidth;
+    unsigned int nativeBufferHeight;
+    int stride;
+    unsigned char *ptr;
+} nativeBufferTexture_s;
+
+static nativeBufferTexture_s nativeTexture;
+
+static const float VERTICES_BOX[] =
+{
+    ONEN, ONEN, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEP, ONEP, ONEP,
+    ONEN, ONEN, ONEN, ONEN, ONEP, ONEN, ONEP, ONEN, ONEN, ONEP, ONEP, ONEN,
+    ONEN, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN, ONEN, ONEN, ONEN, ONEP, ONEN,
+    ONEP, ONEN, ONEN, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEP, ONEP,
+    ONEN, ONEP, ONEP, ONEP, ONEP, ONEP, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN,
+    ONEN, ONEN, ONEP, ONEN, ONEN, ONEN, ONEP, ONEN, ONEP, ONEP, ONEN, ONEN
+};
+
+static const float TEXTURE_COORD[] =
+{
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP,
+    ONEP, ZERO, ZERO, ZERO, ONEP, ONEP, ZERO, ONEP
+};
+
+static const char VERTEX_TEXT[] =
+    "attribute vec3 a_position;\n"
+    "attribute vec2 a_texcoord;\n"
+    "uniform mat4 u_mvpMatrix;\n"
+    "uniform mat4 u_modelMatrix;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main()\n"
+    "{\n"
+    "	v_texcoord = a_texcoord;\n"
+    "	vec3 pos = vec3( u_modelMatrix * vec4(a_position, 1.0) );\n"
+    "	fogFactor = clamp( ( 6.5 - length(pos) ) / 2.5, 0.0, 1.0);\n"
+    "	gl_Position = u_mvpMatrix * vec4(a_position, 1.0);\n"
+    "}\n";
+
+static const char FRAGMENT_TEXT[] =
+    "#ifdef GL_ES\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "uniform sampler2D uTexture;\n"
+    "uniform vec4 u_fogColor;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main (void)\n"
+    "{\n"
+    "	vec4 resColor;\n"
+    "	resColor =  vec4(texture2D(uTexture, vec2(1,1) - v_texcoord).rgb, 1.0);\n"
+    "	gl_FragColor = mix( u_fogColor, resColor, fogFactor );\n"
+    "}\n";
+
+static const char FRAGMENT_TEXT_GL_OES_EGL_IMAGE[] =
+    "#extension GL_OES_EGL_image_external : require\n"
+    "#ifdef GL_ES\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "uniform samplerExternalOES uTexture;\n"
+    "uniform vec4 u_fogColor;\n"
+    "varying vec2 v_texcoord;\n"
+    "varying float fogFactor;\n"
+    "void main (void)\n"
+    "{\n"
+    "	vec4 resColor;\n"
+    "	resColor =  vec4(texture2D(uTexture, vec2(1,1) - v_texcoord).rgb, 1.0);\n"
+    "	gl_FragColor = mix( u_fogColor, resColor, fogFactor );\n"
+    "}\n";
+
+const unsigned char FONT8x8[97][8] = {
+    { 0x08,0x08,0x08,0x00,0x00,0x00,0x00,0x00 }, // columns, rows, num_bytes_per_char
+    { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, // space 0x20
+    { 0x30,0x78,0x78,0x30,0x30,0x00,0x30,0x00 }, // !
+    { 0x6C,0x6C,0x6C,0x00,0x00,0x00,0x00,0x00 }, // "
+    { 0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00 }, // #
+    { 0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00 }, // $
+    { 0x00,0x63,0x66,0x0C,0x18,0x33,0x63,0x00 }, // %
+    { 0x1C,0x36,0x1C,0x3B,0x6E,0x66,0x3B,0x00 }, // &
+    { 0x30,0x30,0x60,0x00,0x00,0x00,0x00,0x00 }, // '
+    { 0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00 }, // (
+    { 0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00 }, // )
+    { 0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00 }, // *
+    { 0x00,0x30,0x30,0xFC,0x30,0x30,0x00,0x00 }, // +
+    { 0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30 }, // ,
+    { 0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00 }, // -
+    { 0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00 }, // .
+    { 0x03,0x06,0x0C,0x18,0x30,0x60,0x40,0x00 }, // / (forward slash)
+    { 0x3E,0x63,0x63,0x6B,0x63,0x63,0x3E,0x00 }, // 0 0x30
+    { 0x18,0x38,0x58,0x18,0x18,0x18,0x7E,0x00 }, // 1
+    { 0x3C,0x66,0x06,0x1C,0x30,0x66,0x7E,0x00 }, // 2
+    { 0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00 }, // 3
+    { 0x0E,0x1E,0x36,0x66,0x7F,0x06,0x0F,0x00 }, // 4
+    { 0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00 }, // 5
+    { 0x1C,0x30,0x60,0x7C,0x66,0x66,0x3C,0x00 }, // 6
+    { 0x7E,0x66,0x06,0x0C,0x18,0x18,0x18,0x00 }, // 7
+    { 0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00 }, // 8
+    { 0x3C,0x66,0x66,0x3E,0x06,0x0C,0x38,0x00 }, // 9
+    { 0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00 }, // :
+    { 0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30 }, // ;
+    { 0x0C,0x18,0x30,0x60,0x30,0x18,0x0C,0x00 }, // <
+    { 0x00,0x00,0x7E,0x00,0x00,0x7E,0x00,0x00 }, // =
+    { 0x30,0x18,0x0C,0x06,0x0C,0x18,0x30,0x00 }, // >
+    { 0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00 }, // ?
+    { 0x3E,0x63,0x6F,0x69,0x6F,0x60,0x3E,0x00 }, // @ 0x40
+    { 0x18,0x3C,0x66,0x66,0x7E,0x66,0x66,0x00 }, // A
+    { 0x7E,0x33,0x33,0x3E,0x33,0x33,0x7E,0x00 }, // B
+    { 0x1E,0x33,0x60,0x60,0x60,0x33,0x1E,0x00 }, // C
+    { 0x7C,0x36,0x33,0x33,0x33,0x36,0x7C,0x00 }, // D
+    { 0x7F,0x31,0x34,0x3C,0x34,0x31,0x7F,0x00 }, // E
+    { 0x7F,0x31,0x34,0x3C,0x34,0x30,0x78,0x00 }, // F
+    { 0x1E,0x33,0x60,0x60,0x67,0x33,0x1F,0x00 }, // G
+    { 0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00 }, // H
+    { 0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00 }, // I
+    { 0x0F,0x06,0x06,0x06,0x66,0x66,0x3C,0x00 }, // J
+    { 0x73,0x33,0x36,0x3C,0x36,0x33,0x73,0x00 }, // K
+    { 0x78,0x30,0x30,0x30,0x31,0x33,0x7F,0x00 }, // L
+    { 0x63,0x77,0x7F,0x7F,0x6B,0x63,0x63,0x00 }, // M
+    { 0x63,0x73,0x7B,0x6F,0x67,0x63,0x63,0x00 }, // N
+    { 0x3E,0x63,0x63,0x63,0x63,0x63,0x3E,0x00 }, // O
+    { 0x7E,0x33,0x33,0x3E,0x30,0x30,0x78,0x00 }, // P 0x50
+    { 0x3C,0x66,0x66,0x66,0x6E,0x3C,0x0E,0x00 }, // Q
+    { 0x7E,0x33,0x33,0x3E,0x36,0x33,0x73,0x00 }, // R
+    { 0x3C,0x66,0x30,0x18,0x0C,0x66,0x3C,0x00 }, // S
+    { 0x7E,0x5A,0x18,0x18,0x18,0x18,0x3C,0x00 }, // T
+    { 0x66,0x66,0x66,0x66,0x66,0x66,0x7E,0x00 }, // U
+    { 0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00 }, // V
+    { 0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00 }, // W
+    { 0x63,0x63,0x36,0x1C,0x1C,0x36,0x63,0x00 }, // X
+    { 0x66,0x66,0x66,0x3C,0x18,0x18,0x3C,0x00 }, // Y
+    { 0x7F,0x63,0x46,0x0C,0x19,0x33,0x7F,0x00 }, // Z
+    { 0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00 }, // [
+    { 0x60,0x30,0x18,0x0C,0x06,0x03,0x01,0x00 }, // \ (back slash)
+    { 0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00 }, // ]
+    { 0x08,0x1C,0x36,0x63,0x00,0x00,0x00,0x00 }, // ^
+    { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF }, // _
+    { 0x18,0x18,0x0C,0x00,0x00,0x00,0x00,0x00 }, // ` 0x60
+    { 0x00,0x00,0x3C,0x06,0x3E,0x66,0x3B,0x00 }, // a
+    { 0x70,0x30,0x3E,0x33,0x33,0x33,0x6E,0x00 }, // b
+    { 0x00,0x00,0x3C,0x66,0x60,0x66,0x3C,0x00 }, // c
+    { 0x0E,0x06,0x3E,0x66,0x66,0x66,0x3B,0x00 }, // d
+    { 0x00,0x00,0x3C,0x66,0x7E,0x60,0x3C,0x00 }, // e
+    { 0x1C,0x36,0x30,0x78,0x30,0x30,0x78,0x00 }, // f
+    { 0x00,0x00,0x3B,0x66,0x66,0x3E,0x06,0x7C }, // g
+    { 0x70,0x30,0x36,0x3B,0x33,0x33,0x73,0x00 }, // h
+    { 0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00 }, // i
+    { 0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3C }, // j
+    { 0x70,0x30,0x33,0x36,0x3C,0x36,0x73,0x00 }, // k
+    { 0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00 }, // l
+    { 0x00,0x00,0x66,0x7F,0x7F,0x6B,0x63,0x00 }, // m
+    { 0x00,0x00,0x7C,0x66,0x66,0x66,0x66,0x00 }, // n
+    { 0x00,0x00,0x3C,0x66,0x66,0x66,0x3C,0x00 }, // o
+    { 0x00,0x00,0x6E,0x33,0x33,0x3E,0x30,0x78 }, // p
+    { 0x00,0x00,0x3B,0x66,0x66,0x3E,0x06,0x0F }, // q
+    { 0x00,0x00,0x6E,0x3B,0x33,0x30,0x78,0x00 }, // r
+    { 0x00,0x00,0x3E,0x60,0x3C,0x06,0x7C,0x00 }, // s
+    { 0x08,0x18,0x3E,0x18,0x18,0x1A,0x0C,0x00 }, // t
+    { 0x00,0x00,0x66,0x66,0x66,0x66,0x3B,0x00 }, // u
+    { 0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00 }, // v
+    { 0x00,0x00,0x63,0x6B,0x7F,0x7F,0x36,0x00 }, // w
+    { 0x00,0x00,0x63,0x36,0x1C,0x36,0x63,0x00 }, // x
+    { 0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x7C }, // y
+    { 0x00,0x00,0x7E,0x4C,0x18,0x32,0x7E,0x00 }, // z
+    { 0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00 }, // {
+    { 0x0C,0x0C,0x0C,0x00,0x0C,0x0C,0x0C,0x00 }, // |
+    { 0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00 }, // }
+    { 0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00 }, // ~
+    { 0x1C,0x36,0x36,0x1C,0x00,0x00,0x00,0x00 } // DEL
+    };
+
+char *tizen_str = (char*)"Tizen";
+char *dali_str = (char*)"DALi";
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // common
 
-static GLfloat vtxs[] =
-{
-    0.0f, 1.0f, 0.0f,
-    1.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f,
-    1.0f, 0.0f, 0.0f
-};
-
-static GLfloat texcoords[] =
-{
-    0.0f, 1.0f,
-    1.0f, 1.0f,
-    0.0f, 0.0f,
-    1.0f, 0.0f
-};
-
 static void
-_matrix_load_identity(matrix_t *res)
+init_matrix(float matrix[16])
 {
-    memset(res, 0x0, sizeof(matrix_t));
+    matrix[0] = 1.0f;
+    matrix[1] = 0.0f;
+    matrix[2] = 0.0f;
+    matrix[3] = 0.0f;
 
-    res->m[0][0] = 1.0f;
-    res->m[1][1] = 1.0f;
-    res->m[2][2] = 1.0f;
-    res->m[3][3] = 1.0f;
+    matrix[4] = 0.0f;
+    matrix[5] = 1.0f;
+    matrix[6] = 0.0f;
+    matrix[7] = 0.0f;
+
+    matrix[8] = 0.0f;
+    matrix[9] = 0.0f;
+    matrix[10] = 1.0f;
+    matrix[11] = 0.0f;
+
+    matrix[12] = 0.0f;
+    matrix[13] = 0.0f;
+    matrix[14] = 0.0f;
+    matrix[15] = 1.0f;
 }
 
 static void
-_matrix_translate(matrix_t *res, GLfloat tx, GLfloat ty, GLfloat tz)
+multiply_matrix(float matrix[16], const float matrix0[16], const float matrix1[16])
 {
-    res->m[3][0] += (res->m[0][0] * tx + res->m[1][0] * ty + res->m[2][0] * tz);
-    res->m[3][1] += (res->m[0][1] * tx + res->m[1][1] * ty + res->m[2][1] * tz);
-    res->m[3][2] += (res->m[0][2] * tx + res->m[1][2] * ty + res->m[2][2] * tz);
-    res->m[3][3] += (res->m[0][3] * tx + res->m[1][3] * ty + res->m[2][3] * tz);
-}
-
-static void
-_matrix_multiply(matrix_t *res, matrix_t *src_a, matrix_t *src_b)
-{
-    matrix_t tmp;
     int i;
+    int row;
+    int column;
+    float temp[16];
 
-    for( i = 0; i < 4; i++ )
-    {
-        tmp.m[i][0] = (src_a->m[i][0] * src_b->m[0][0]) +
-            (src_a->m[i][1] * src_b->m[1][0]) +
-            (src_a->m[i][2] * src_b->m[2][0]) +
-            (src_a->m[i][3] * src_b->m[3][0]) ;
+    for (column = 0; column < 4; column++) {
+        for (row = 0; row < 4; row++) {
+                temp[(column * 4) + row] = 0.0f;
 
-        tmp.m[i][1] = (src_a->m[i][0] * src_b->m[0][1]) +
-            (src_a->m[i][1] * src_b->m[1][1]) +
-            (src_a->m[i][2] * src_b->m[2][1]) +
-            (src_a->m[i][3] * src_b->m[3][1]) ;
-
-        tmp.m[i][2] = (src_a->m[i][0] * src_b->m[0][2]) +
-            (src_a->m[i][1] * src_b->m[1][2]) +
-            (src_a->m[i][2] * src_b->m[2][2]) +
-            (src_a->m[i][3] * src_b->m[3][2]) ;
-
-        tmp.m[i][3] = (src_a->m[i][0] * src_b->m[0][3]) +
-            (src_a->m[i][1] * src_b->m[1][3]) +
-            (src_a->m[i][2] * src_b->m[2][3]) +
-            (src_a->m[i][3] * src_b->m[3][3]) ;
-    }
-    memcpy( res, &tmp, sizeof(matrix_t) );
-}
-
-static void
-_matrix_scale(matrix_t *res, GLfloat sx, GLfloat sy, GLfloat sz)
-{
-    res->m[0][0] *= sx;
-    res->m[0][1] *= sx;
-    res->m[0][2] *= sx;
-    res->m[0][3] *= sx;
-
-    res->m[1][0] *= sy;
-    res->m[1][1] *= sy;
-    res->m[1][2] *= sy;
-    res->m[1][3] *= sy;
-
-    res->m[2][0] *= sz;
-    res->m[2][1] *= sz;
-    res->m[2][2] *= sz;
-    res->m[2][3] *= sz;
-}
-
-static void
-_matrix_frustum(matrix_t *res, float left, float right, float bottom,
-                float top, float near, float far)
-{
-    float d_x = right - left;
-    float d_y = top - bottom;
-    float d_z = far - near;
-    matrix_t frust;
-
-    if ( (near <= 0.0f) || (far <= 0.0f) || (d_x <= 0.0f) || (d_y <= 0.0f) || (d_z <= 0.0f) ) return;
-
-    frust.m[0][0] = 2.0f * near / d_x;
-    frust.m[0][1] = frust.m[0][2] = frust.m[0][3] = 0.0f;
-
-    frust.m[1][1] = 2.0f * near / d_y;
-    frust.m[1][0] = frust.m[1][2] = frust.m[1][3] = 0.0f;
-
-    frust.m[2][0] = (right + left) / d_x;
-    frust.m[2][1] = (top + bottom) / d_y;
-    frust.m[2][2] = -(near + far) / d_z;
-    frust.m[2][3] = -1.0f;
-
-    frust.m[3][2] = -2.0f * near * far / d_z;
-    frust.m[3][0] = frust.m[3][1] = frust.m[3][3] = 0.0f;
-
-    _matrix_multiply( res, &frust, res );
-}
-
-static void
-_window_coord(matrix_t *mtx, int w, int h)
-{
-        float fovy, aspect, znear, zfar;
-    float xmin, xmax, ymin, ymax;
-
-    float z_camera;
-//    float fovy_rad;
-
-    glViewport( 0, 0, w, h );
-
-    fovy = 60.0f;
-    aspect = 1.0f;
-    znear = 0.1f;
-    zfar = 100.0f;
-
-    ymax = znear * tan( fovy * M_PI / 360.0f );
-    ymin = -ymax;
-    xmax = ymax * aspect;
-    xmin = ymin * aspect;
-
-    _matrix_load_identity( mtx );
-    _matrix_frustum( mtx, xmin, xmax, ymin, ymax, znear, zfar );
-
-    z_camera = 0.866f;
-
-    _matrix_translate( mtx, -0.5f, -0.5f, -z_camera );
-    _matrix_scale( mtx, 1.0f/w, -1.0f/h, 1.0f/w );
-    _matrix_translate( mtx, 0.0f, -1.0f*h, 0.0f );
-
-
-//finish:
-
-    return;
-}
-
-GLuint esLoadShader ( GLenum type, const char *shaderSrc )
-{
-   GLuint shader;
-   GLint compiled;
-
-   // Create the shader object
-   shader = glCreateShader ( type );
-
-   if ( shader == 0 )
-    return 0;
-
-   // Load the shader source
-   glShaderSource ( shader, 1, &shaderSrc, NULL );
-
-   // Compile the shader
-   glCompileShader ( shader );
-
-   // Check the compile status
-   glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
-
-   if ( !compiled )
-   {
-      GLint infoLen = 0;
-
-      glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
-
-      if ( infoLen > 1 )
-      {
-         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
-
-         glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
-         printf ( "Error compiling shader:\n%s\n", infoLog );
-
-         free ( infoLog );
-      }
-
-      glDeleteShader ( shader );
-      return 0;
-   }
-
-   return shader;
-
-}
-
-GLuint esLoadProgram ( const char *vertShaderSrc, const char *fragShaderSrc )
-{
-   GLuint vertexShader;
-   GLuint fragmentShader;
-   GLuint programObject;
-   GLint linked;
-
-   // Load the vertex/fragment shaders
-   vertexShader = esLoadShader ( GL_VERTEX_SHADER, vertShaderSrc );
-   if ( vertexShader == 0 )
-      return 0;
-
-   fragmentShader = esLoadShader ( GL_FRAGMENT_SHADER, fragShaderSrc );
-   if ( fragmentShader == 0 )
-   {
-      glDeleteShader( vertexShader );
-      return 0;
-   }
-
-   // Create the program object
-   programObject = glCreateProgram ( );
-
-   if ( programObject == 0 )
-      return 0;
-
-   glAttachShader ( programObject, vertexShader );
-   glAttachShader ( programObject, fragmentShader );
-
-   // Link the program
-   glLinkProgram ( programObject );
-
-   // Check the link status
-   glGetProgramiv ( programObject, GL_LINK_STATUS, &linked );
-
-   if ( !linked )
-   {
-      GLint infoLen = 0;
-
-      glGetProgramiv ( programObject, GL_INFO_LOG_LENGTH, &infoLen );
-
-      if ( infoLen > 1 )
-      {
-         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
-
-         glGetProgramInfoLog ( programObject, infoLen, NULL, infoLog );
-         printf ( "Error linking program:\n%s\n", infoLog );
-
-         free ( infoLog );
-      }
-
-      glDeleteProgram ( programObject );
-      return 0;
-   }
-
-   // Free up no longer needed shader resources
-   glDeleteShader ( vertexShader );
-   glDeleteShader ( fragmentShader );
-
-   return programObject;
-}
-
-GLuint LoadShader ( GLenum type, char *shaderSrc )
-{
-    GLuint shader;
-    GLint compiled;
-    GLenum glErrorResult;
-
-    // Create the shader object
-    shader = glCreateShader ( type );
-
-    if ( shader == 0 ) {
-        if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-            printf("[glCreateShader][glGetError] 0x%04X\n", glErrorResult);
-        return 0;
+                for (i = 0; i < 4; i++)
+                    temp[(column * 4) + row] += matrix0[(i * 4) + row] * matrix1[(column * 4) + i];
+            }
     }
 
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glCreateShader][glGetError] 0x%04X\n", glErrorResult);
-    printf("[glCreateShader] Success.\n");
+    for (i = 0; i < 16; i++)
+        matrix[i] = temp[i];
+}
 
-    // Load the shader source
-    glShaderSource ( shader, 1, &shaderSrc, NULL );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glShaderSource][glGetError] 0x%04X\n", glErrorResult);
+void
+Frustum(float matrix[4][4], float left, float right, float bottom, float top, float near, float far)
+{
+    float diffX = right - left;
+    float diffY = top - bottom;
+    float diffZ = far - near;
 
-    // Compile the shader
-    glCompileShader ( shader );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glCompileShader][glGetError] 0x%04X\n", glErrorResult);
+    if ((near <= 0.0f) || (far <= 0.0f) ||
+        (diffX <= 0.0f) || (diffY <= 0.0f) || (diffZ <= 0.0f)) {
+        return;
+    }
 
-    // Check the compile status
-    glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glGetShaderiv][glGetError] 0x%04X\n", glErrorResult);
+    matrix[0][0] = 2.0f * near / diffX;
+    matrix[1][1] = 2.0f * near / diffY;
+    matrix[2][0] = (right + left) / diffX;
+    matrix[2][1] = (top + bottom) / diffY;
+    matrix[2][2] = -(near + far) / diffZ;
+    matrix[2][3] = -1.0f;
+    matrix[3][2] = -2.0f * near * far / diffZ;
 
-    if ( !compiled )
-    {
-        GLint infoLen = 0;
+    matrix[0][1] = matrix[0][2] = matrix[0][3] = 0.0f;
+    matrix[1][0] = matrix[1][2] = matrix[1][3] = 0.0f;
+    matrix[3][0] = matrix[3][1] = matrix[3][3] = 0.0f;
+}
 
-        glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
+void
+Perspective(float pResult[4][4], float fovY, float aspect, float near, float far)
+{
+    float fovRadian = fovY / 360.0f * PI;
+    float top = tanf(fovRadian) * near;
+    float right = top * aspect;
 
-        if ( infoLen > 1 )
-        {
-            char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+    Frustum(pResult, -right, right, -top, top, near, far);
+}
 
-            glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
-            printf ( "[glGetShaderiv] Error compiling shader:\n%s\n", infoLog );
+void
+Translate(float pResult[4][4], float tx, float ty, float tz)
+{
+    pResult[3][0] += (pResult[0][0] * tx + pResult[1][0] * ty + pResult[2][0] * tz);
+    pResult[3][1] += (pResult[0][1] * tx + pResult[1][1] * ty + pResult[2][1] * tz);
+    pResult[3][2] += (pResult[0][2] * tx + pResult[1][2] * ty + pResult[2][2] * tz);
+    pResult[3][3] += (pResult[0][3] * tx + pResult[1][3] * ty + pResult[2][3] * tz);
+}
 
-            free ( infoLog );
+void
+Rotate(float pResult[4][4], float angle, float x, float y, float z)
+{
+    float rotate[4][4];
+
+    float cos = cosf(angle * PI / 180.0f);
+    float sin = sinf(angle * PI / 180.0f);
+    float cos1 = 1.0f - cos;
+
+    float len = sqrtf(x*x + y*y + z*z);
+
+    x = x / len;
+    y = y / len;
+    z = z / len;
+
+    rotate[0][0] = (x * x) * cos1 + cos;
+    rotate[0][1] = (x * y) * cos1 - z * sin;
+    rotate[0][2] = (z * x) * cos1 + y * sin;
+    rotate[0][3] = 0.0f;
+
+    rotate[1][0] = (x * y) * cos1 + z * sin;
+    rotate[1][1] = (y * y) * cos1 + cos;
+    rotate[1][2] = (y * z) * cos1 - x * sin;
+    rotate[1][3] = 0.0f;
+
+    rotate[2][0] = (z * x) * cos1 - y * sin;
+    rotate[2][1] = (y * z) * cos1 + x * sin;
+    rotate[2][2] = (z * z) * cos1 + cos;
+
+    rotate[2][3] = rotate[3][0] = rotate[3][1] = rotate[3][2] = 0.0f;
+    rotate[3][3] = 1.0f;
+
+    multiply_matrix((float*)pResult, (float*)pResult, (float*)rotate);
+}
+
+static void
+characterWindow(int x, int y, int w, int h)
+{
+    // current pixel location
+    _x = x;
+    _y = y;
+    // characterWindow settings
+    _x1 = x;
+    _x2 = x + w - 1;
+    _y1 = y;
+    _y2 = y + h - 1;
+}
+
+static void
+putp(nativeBufferTexture_s *ns, int colour)
+{
+    unsigned int *_p;
+    _p = (unsigned int *)(((unsigned char *)ns->ptr) + (_y * ns->stride));
+    _p[_x] = colour;
+
+    _x++;
+    if(_x > _x2) {
+        _x = _x1;
+        _y++;
+        if(_y > _y2) {
+            _y = _y1;
         }
-
-        glDeleteShader ( shader );
-        return 0;
     }
-
-    return shader;
-
 }
+
+static void
+blitbit(nativeBufferTexture_s *ns, int x, int y, int w, int h, const char* colour)
+{
+    int i;
+    characterWindow(x, y, w, h);
+    for(i = 0; i < w*h; i++) {
+        char byte = colour[i >> 3];
+        int offset = i & 0x7;
+        int c = ((byte << offset) & 0x80) ? foregroundColor : backgroundColor;
+        putp(ns, c);
+    }
+}
+
+static void
+character(nativeBufferTexture_s *ns, int column, int row, int value)
+{
+    blitbit(ns, column * 8, row * 8, 8, 8, (char*)&(FONT8x8[value - 0x1F][0]));
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Shader and global data
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // onscreen
 
-int Init_tex()
-{
-    const char vShaderStr[] =
-      "attribute vec4 a_position;   \n"
-      "attribute vec2 a_texCoord;   \n"
-      "varying vec2 v_texCoord;     \n"
-      "void main()                  \n"
-      "{                            \n"
-      "   gl_Position = a_position; \n"
-      "   v_texCoord = a_texCoord;  \n"
-      "}                            \n";
 
-   const char fShaderStr[] =
-      "#extension GL_OES_EGL_image_external:require        \n"
-      "precision mediump float;                            \n"
-      "varying vec2 v_texCoord;                            \n"
-      "uniform samplerExternalOES s_texture;               \n"
-      "void main()                                         \n"
-      "{                                                   \n"
-      "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
-      "}                                                   \n";
-
-    //GLint linked;
-
-    //GLenum glErrorResult;
-
-    _matrix_load_identity(&mGLData.perspective);
-    _window_coord(&mGLData.perspective, SCREEN_WIDTH, SCREEN_HEIGHT);
-
-    // Load the shaders and get a linked program object
-    mGLData.onscreen_programObject = esLoadProgram(vShaderStr, fShaderStr);
-
-    // Get the attribute locations
-    mGLData.positionLoc = glGetAttribLocation(mGLData.onscreen_programObject, "a_position");
-    mGLData.texCoordLoc = glGetAttribLocation(mGLData.onscreen_programObject, "a_texCoord");
-    mGLData.mvpLoc = glGetAttribLocation(mGLData.onscreen_programObject, "u_mvp_matrix");
-    mGLData.samplerLoc = glGetUniformLocation (mGLData.onscreen_programObject, "s_texture");
-
-
-    glDisable(GL_BLEND);
-
-    glGenTextures(1, &mGLData.textureId);
-    glBindTexture(GL_TEXTURE_2D, mGLData.textureId);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, (GLuint)NULL);
-
-    glClearColor( 0.4f, 0.4f, 0.8f, 1.0f );
-
-    glUseProgram(mGLData.onscreen_programObject);
-
-    glVertexAttribPointer(mGLData.positionLoc, 3, GL_FLOAT, GL_FALSE, 0, vtxs);
-    glEnableVertexAttribArray(mGLData.positionLoc);
-
-    glVertexAttribPointer(mGLData.texCoordLoc, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
-    glEnableVertexAttribArray(mGLData.texCoordLoc);
-
-    return 1;
-}
-
-void init_onscreen()
-{
-  Init_tex();
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // offscreen
 
-int createTBMWindow()
+static void
+updateNativeTexture(nativeBufferTexture_s *nativeTexture, unsigned int column, unsigned int row, char *str)
 {
-#if ENABLE_GL_OFFSCREEN
-    mGLData.mTbmDisplay = tbm_bufmgr_init(-1);
+    unsigned int x, y;
+    unsigned int *_p;
+    tbm_surface_info_s surface_info;
 
-    if (!mGLData.mTbmDisplay) {
-        printf("[TBM native display] Failed on init .\n");
-        return 0;
-    } else {
-        printf("[TBM native display] Success on init.\n");
-    }
+    tbm_surface_map(nativeTexture->buffer, TBM_SURF_OPTION_READ|TBM_SURF_OPTION_WRITE, &surface_info);
 
-    mGLData.mTbmSurfaceQueue = tbm_surface_queue_create(3, SCREEN_WIDTH, SCREEN_HEIGHT, TBM_FORMAT_ARGB8888, 0);
-    if (!mGLData.mTbmSurfaceQueue) {
-        printf("[TBM native window] Failed on init .\n");
-        return 0;
-    } else {
-        printf("[TBM native window] Success on init.\n");
-    }
-
-    mGLData.hWnd = (EGLNativeWindowType)mGLData.mTbmSurfaceQueue;
-#else
-    tbm_surface_info_s info;
-    int w = SCREEN_WIDTH, h = SCREEN_HEIGHT;
-    int i, j;
-
-    mGLData.mCurrentSurface = tbm_surface_create(SCREEN_WIDTH, SCREEN_HEIGHT, TBM_FORMAT_ARGB8888);
-    //fprintf(stderr,"%s : create surface %p\n",__FUNCTION__,mGLData.mCurrentSurface);
-    //fprintf(stderr,"%s : call tbm_surface_map %p\n",__FUNCTION__,mGLData.mCurrentSurface);
-    tbm_surface_map(mGLData.mCurrentSurface, TBM_SURF_OPTION_WRITE|TBM_SURF_OPTION_READ, &info);
-    unsigned char *ptr = info.planes[0].ptr;
-    for (j=0; j<h; j++)
+    if (surface_info.num_planes != 0)
     {
-       for (i=0; i<w; i++)
-       {
-          ptr[0] = 255;
-          ptr[1] = 0;
-          ptr[2] = 0;
-          ptr[3] = 255;
-          ptr += 4;
-       }
-    }
+        nativeTexture->ptr = surface_info.planes[0].ptr;
+        nativeTexture->stride = surface_info.planes[0].stride;
 
-    //fprintf(stderr,"%s : call tbm_surface_unmap %p\n",__FUNCTION__,mGLData.mCurrentSurface);
-    tbm_surface_unmap(mGLData.mCurrentSurface);
-#endif
-    return 1;
-}
-
-int createOffscreenEGLContext()
-{
-    EGLint attribList[] =
-    {
-        EGL_RED_SIZE,       5,
-        EGL_GREEN_SIZE,     6,
-        EGL_BLUE_SIZE,      5,
-        EGL_ALPHA_SIZE,     8,
-        EGL_DEPTH_SIZE,     8,
-        EGL_STENCIL_SIZE,   8,
-        EGL_SAMPLE_BUFFERS, 1,
-        EGL_NONE
-    };
-
-    EGLint numConfigs;
-    EGLint majorVersion;
-    EGLint minorVersion;
-    EGLDisplay display;
-    EGLContext context;
-    EGLSurface surface;
-    EGLConfig config;
-    EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE, EGL_NONE };
-
-    EGLint eglErrorResult;
-
-    // Get Display
-    display = eglGetDisplay(mGLData.mTbmDisplay);
-    eglErrorResult = eglGetError();
-
-    if ( display == EGL_NO_DISPLAY )
-    {
-       printf("[eglGetDisplay] Failed.");
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetDisplay][eglGetError] 0x%04X\n", eglErrorResult);
-
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetDisplay][eglGetError] 0x%04X\n", eglErrorResult);
-
-    printf("[eglGetDisplay] Success.\n");
-
-    // Initialize EGL
-    if ( !eglInitialize(display, &majorVersion, &minorVersion) )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglInitialize][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglInitialize][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglInitialize] Success.\n");
-
-    // Get configs
-    if ( !eglGetConfigs(display, NULL, 0, &numConfigs) )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetConfigs][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglGetConfigs][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglGetConfigs] Success.\n");
-
-    // Choose config
-    if ( !eglChooseConfig(display, attribList, &config, 1, &numConfigs) )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglChooseConfig][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglChooseConfig][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglChooseConfig] Success.\n");
-
-    // Create a surface
-    surface = eglCreateWindowSurface(display, config, (EGLNativeWindowType)mGLData.hWnd, NULL);
-    if ( surface == EGL_NO_SURFACE )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateWindowSurface][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateWindowSurface][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglCreateWindowSurface] Success.\n");
-
-    // Create a GL context
-    context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs );
-    if ( context == EGL_NO_CONTEXT )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateContext][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglCreateContext][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglCreateContext] Success.\n");
-
-    // Make the context current
-    if ( !eglMakeCurrent(display, surface, surface, context) )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
-       return 0;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS) printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
-    printf("[eglMakeCurrent] Success.\n");
-
-    mGLData.eglDisplay = display;
-    mGLData.eglSurface = surface;
-    mGLData.eglContext = context;
-    return 1;
-}
-int initOffscreenShader()
-{
-    GLbyte vShaderStr[] =
-        "attribute vec4 vPosition;    \n"
-        "void main()                  \n"
-        "{                            \n"
-        "   gl_Position = vPosition;  \n"
-        "}                            \n";
-
-    GLbyte fShaderStr[] =
-        "precision mediump float;\n"\
-        "void main()                                  \n"
-        "{                                            \n"
-        "  gl_FragColor = vec4 ( 0.0, 1.0, 0.0, 1.0 );\n"
-        "}                                            \n";
-
-    GLuint vertexShader;
-    GLuint fragmentShader;
-    GLuint programObject;
-    GLint linked;
-
-    GLenum glErrorResult;
-
-    // Load the vertex/fragment shaders
-    vertexShader = LoadShader ( GL_VERTEX_SHADER, (char*)vShaderStr );
-    fragmentShader = LoadShader ( GL_FRAGMENT_SHADER, (char*)fShaderStr );
-
-    // Create the program object
-    programObject = glCreateProgram ( );
-
-    if ( programObject == 0 ) {
-        if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-            printf("[glCreateProgram][glGetError] 0x%04X\n", glErrorResult);
-        printf("[glCreateProgram] Failed.\n");
-        return 0;
-    }
-    printf("[glCreateProgram] Success.\n");
-
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glGetShaderiv][glGetError] 0x%04X\n", glErrorResult);
-
-    glAttachShader ( programObject, vertexShader );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glAttachShader-vertex][glGetError] 0x%04X\n", glErrorResult);
-    glAttachShader ( programObject, fragmentShader );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glAttachShader-fragment][glGetError] 0x%04X\n", glErrorResult);
-
-    // Bind vPosition to attribute 0
-    glBindAttribLocation ( programObject, 0, "vPosition" );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glBindAttribLocation][glGetError] 0x%04X\n", glErrorResult);
-
-    // Link the program
-    glLinkProgram ( programObject );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glLinkProgram][glGetError] 0x%04X\n", glErrorResult);
-
-    // Check the link status
-    glGetProgramiv ( programObject, GL_LINK_STATUS, &linked );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glGetProgramiv][glGetError] 0x%04X\n", glErrorResult);
-
-    if ( !linked )
-    {
-        GLint infoLen = 0;
-
-        glGetProgramiv ( programObject, GL_INFO_LOG_LENGTH, &infoLen );
-
-        if ( infoLen > 1 )
-        {
-            char* infoLog = (char*)malloc (sizeof(char) * infoLen );
-
-            glGetProgramInfoLog ( programObject, infoLen, NULL, infoLog );
-            printf ( "[glGetProgramiv] Error linking program:\n%s\n", infoLog );
-
-            free ( infoLog );
+        for (y = 0; y < nativeTexture->nativeBufferHeight; y++) {
+            _p = (unsigned int *)(((unsigned char *)nativeTexture->ptr) + (y * nativeTexture->stride));
+            for (x = 0; x < nativeTexture->nativeBufferWidth; x++) {
+                _p[x] = backgroundColor;
+            }
         }
 
-        glDeleteProgram ( programObject );
-        return 0;
+        while (*str != '\0') {
+            character(nativeTexture, column++, row, (int)*str++);
+        }
     }
 
-    // Store the program object
-    mGLData.offscreen_programObject = programObject;
-
-    glClearColor ( 0.0f, 0.0f, 0.0f, 0.0f );
-    return 1;
+    tbm_surface_unmap(nativeTexture->buffer);
 }
 
-void init_offscreen()
+void init()
 {
-  createTBMWindow();
-#ifndef ENABLE_GL_OFFSCREEN
-  createOffscreenEGLContext();
-  initOffscreenShader();
-#endif
+    tbm_format *formats;
+    tbm_format format = TBM_FORMAT_ARGB8888;
+    uint32_t formats_count;
+
+    g_angle = 0.0f;
+    const char *p;
+    p = VERTEX_TEXT;
+    vtx_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vtx_shader, 1, &p, NULL);
+    glCompileShader(vtx_shader);
+    const GLubyte *ext = glGetString(GL_EXTENSIONS);
+    if (strstr((const char*)ext, "GL_OES_EGL_image_external") == NULL) {
+        printf( "GL_OES_EGL_image_external is required in order to fully get effect from API. %i", __LINE__);
+        isGL_OES_EGL_exist = false;
+    }
+    p = (isGL_OES_EGL_exist) ? FRAGMENT_TEXT_GL_OES_EGL_IMAGE : FRAGMENT_TEXT;
+    fgmt_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fgmt_shader, 1, &p, NULL);
+    glCompileShader(fgmt_shader);
+
+    program = glCreateProgram();
+    glAttachShader(program, vtx_shader);
+    glAttachShader(program, fgmt_shader);
+    glLinkProgram(program);
+
+    idxVPosition = glGetAttribLocation(program, "a_position");
+    idxVTexCoord = glGetAttribLocation(program, "a_texcoord");
+    idxMVP = glGetUniformLocation(program, "u_mvpMatrix");
+    idxModelVeiw = glGetUniformLocation(program, "u_modelMatrix");
+    idxfogColor = glGetUniformLocation(program, "u_fogColor");
+
+    glGenBuffers(1, &idxVBO_BOX);
+    glBindBuffer(GL_ARRAY_BUFFER, idxVBO_BOX);
+    glBufferData(GL_ARRAY_BUFFER, 12*6*sizeof(float), VERTICES_BOX, GL_STATIC_DRAW);
+
+    glGenBuffers(1, &idxTBO);
+    glBindBuffer(GL_ARRAY_BUFFER, idxTBO);
+    glBufferData(GL_ARRAY_BUFFER, 6*8*sizeof(float), TEXTURE_COORD, GL_STATIC_DRAW);
+
+    nativeTexture.nativeBufferWidth = 70;
+    nativeTexture.nativeBufferHeight = 50;
+
+    tbm_surface_query_formats(&formats, &formats_count);
+    for (int i = 0; i < (int)formats_count; i++)
+    {
+        if (formats[i] == TBM_FORMAT_BGRA8888)
+            format = TBM_FORMAT_BGRA8888;
+    }
+
+    nativeTexture.buffer = tbm_surface_create(nativeTexture.nativeBufferWidth, nativeTexture.nativeBufferHeight, format);
+
+    updateNativeTexture(&nativeTexture, 1, 3, tizen_str);
+
+    glGenTextures(1, &nativeTexture.renderedTexture);
+
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, nativeTexture.renderedTexture);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    mGLData.mImageExtension.CreateImageKHR(SCREEN_WIDTH, SCREEN_HEIGHT, NativeImageSource::ColorDepth::COLOR_DEPTH_32, nativeTexture.buffer );
+    mGLData.mImageExtension.TargetTextureKHR();
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glEnable(GL_DEPTH_TEST);
+
+    init_matrix((float*)view);
+    init_matrix((float*)matPerspective);
+    Perspective(matPerspective, 60.0f, (float)SCREEN_WIDTH/(float)SCREEN_HEIGHT, 1.0f, 400.0f);
 }
+
 
 // pullic Callbacks
 // intialize callback that gets called once for intialization
 API void initialize_gl()
 {
-   printf("init_gl start~~~~\n");
+   fprintf(stderr, "%s: initialize_gl start~~~~\n",__FUNCTION__);
 
    mGLData.mImageExtension = Dali::GlWindowExtensions::ImageExtension::New( mGLWindow );
    mGLData.mSyncExtension = Dali::GlWindowExtensions::SyncExtension::New( mGLWindow );
 
+   init();
+
    mGLData.IsCreatedEGLImage = false;
    mGLData.IsCreatedSyncObject = false;
 
-   init_onscreen();
-
-   init_offscreen();
-
    mGLData.mCount = 0;
-}
-
-void Draw_offscreen()
-{
-    //printf("Draw_offscreen\n");
-#if ENABLE_GL_OFFSCREEN
-    EGLint eglErrorResult;
-    if ( !eglMakeCurrent(mGLData.eglDisplay, mGLData.eglSurface, mGLData.eglSurface, mGLData.eglContext) )
-    {
-       if ((eglErrorResult = eglGetError()) != EGL_SUCCESS)
-           printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
-       return;
-    }
-
-    if ((eglErrorResult = eglGetError()) != EGL_SUCCESS)
-    {
-        printf("[eglMakeCurrent][eglGetError] 0x%04X\n", eglErrorResult);
-        return;
-    }
-    printf("[eglMakeCurrent] Success.\n");
-
-    GLfloat vVertices[] = {  0.0f,  0.5f, 0.0f,
-        -0.5f, -0.5f, 0.0f,
-        0.5f, -0.5f, 0.0f };
-
-    GLenum glErrorResult;
-
-    // Set the viewport
-    glViewport ( 0, 0, 100, 100 );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glViewport][glGetError] 0x%04X\n", glErrorResult);
-
-    // Clear the color buffer
-    glClear ( GL_COLOR_BUFFER_BIT );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glClear][glGetError][%d] 0x%04X\n", __LINE__, glErrorResult);
-
-    // Use the program object
-    glUseProgram ( mGLData.offscreen_programObject );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glUseProgram][glGetError] 0x%04X\n", glErrorResult);
-
-    // Load the vertex data
-    glVertexAttribPointer ( 0, 3, GL_FLOAT, GL_FALSE, 0, vVertices );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glVertexAttribPointer][glGetError] 0x%04X\n", glErrorResult);
-
-    glEnableVertexAttribArray ( 0 );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glEnableVertexAttribArray][glGetError] 0x%04X\n", glErrorResult);
-
-    glDrawArrays ( GL_TRIANGLES, 0, 3 );
-    if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-        printf("[glDrawArrays][glGetError] 0x%04X\n", glErrorResult);
-
-    eglSwapBuffers( mGLData.eglDisplay, mGLData.eglSurface );
-     printf("Draw_offscreen is finished\n");
-#else
-    tbm_surface_info_s info;
-    int i, j;
-
-    //fprintf(stderr,"%s : call tbm_surface_map %p\n",__FUNCTION__,mGLData.mCurrentSurface);
-    tbm_surface_map(mGLData.mCurrentSurface, TBM_SURF_OPTION_WRITE|TBM_SURF_OPTION_READ, &info);
-    unsigned char *ptr = info.planes[0].ptr;
-    unsigned int mark = mGLData.mCount%3;
-    //printf("mark : %d\n", mark);
-    for (j=0; j<SCREEN_HEIGHT; j++)
-    {
-       for (i=0; i<SCREEN_WIDTH; i++)
-       {
-           ptr[0] = 255;
-           ptr[1] = 0;
-           ptr[2] = 0;
-           ptr[3] = 255;
-           ptr[mark] = 255;
-           ptr += 4;
-       }
-    }
-    //fprintf(stderr,"%s : call tbm_surface_unmap %p\n",__FUNCTION__,mGLData.mCurrentSurface);
-    tbm_surface_unmap(mGLData.mCurrentSurface);
-#endif
-}
-
-void Draw_onscreen()
-{
-  //printf("Draw_onscreen\n");
-  tbm_surface_h tbm_surface = nullptr;
-#if ENABLE_GL_OFFSCREEN
-  if (tbm_surface_queue_can_acquire((tbm_surface_queue_h)mGLData.hWnd, 1)) {
-      tbm_surface_queue_acquire((tbm_surface_queue_h)mGLData.hWnd, &tbm_surface);
-      printf("get tbm_surface_queue_acquire: %p\n",tbm_surface);
-  }
-
-  if(!tbm_surface)
-  {
-    printf("current tbm surface is null\n");
-    return;
-  }
-
-  mGLData.mCurrentSurface = tbm_surface;
-  /* Onscreen render */
-  mGLWindow.MakeCurrent();
-  printf("GLWindow Make Current\n");
-#else
-  tbm_surface = mGLData.mCurrentSurface;
-#endif
-
-  GLenum glErrorResult;
-  matrix_t modelview;
-
-  glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  glClearColor(0xff, 0xff, 0xff, 0xff);
-  glClear ( GL_COLOR_BUFFER_BIT );
-
-
-  if( mGLData.IsCreatedEGLImage == false )
-  {
-      printf("try to create EGLImage\n");
-      if( mGLData.mImageExtension.CreateImageKHR(SCREEN_WIDTH, SCREEN_HEIGHT, NativeImageSource::ColorDepth::COLOR_DEPTH_32,tbm_surface ) )
-      {
-          mGLData.IsCreatedEGLImage = true;
-          printf("success to create EGLImage\n");
-      }
-      else
-      {
-          mGLData.IsCreatedEGLImage = false;
-          printf("fail to create EGLImage\n");
-      }
-  }
-
-  //printf("Create EGLImage\n");
-
-  glClear ( GL_COLOR_BUFFER_BIT );
-  if ((glErrorResult = glGetError()) != GL_NO_ERROR)
-      printf("[glClear][glGetError][%d] 0x%04X\n", __LINE__, glErrorResult);
-
-
-  // Store the program object
-
-  glBindTexture(GL_TEXTURE_2D, mGLData.textureId);
-  //printf("Bind Texture : %d\n", mGLData.textureId);
-
-  printf("Success to wait sync object\n");
-  mGLData.mImageExtension.TargetTextureKHR();
-  //printf("Create EGLImage\n");
-
-
-  _matrix_load_identity(&modelview);
-  _matrix_translate(&modelview, 0.0f, 0.0f, 0.0f);
-  _matrix_multiply(&mGLData.mvp_matrix, &modelview, &mGLData.perspective);
-
-  glUniformMatrix4fv(mGLData.mvpLoc, 1, GL_FALSE, (GLfloat *)&mGLData.mvp_matrix.m[0][0]);
-  glUniform1i(mGLData.samplerLoc, 0);
-
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  glBindTexture(GL_TEXTURE_2D, (GLuint)NULL);
-
-  //printf("Draw_onscreen is finished\n");
 }
 
 // draw callback is where all the main GL rendering happens
 API int renderFrame_gl()
 {
-#if ENABLE_GL_OFFSCREEN
-   if( mGLData.mCount > 0 && mGLData.mCurrentSurface )
-   {
-     tbm_surface_queue_release((tbm_surface_queue_h)mGLData.hWnd, mGLData.mCurrentSurface);
-     mGLData.mCurrentSurface = nullptr;
-   }
-#endif
+   //fprintf(stderr, "%s: renderFrame_gl start~~~~\n",__FUNCTION__);
 
-   if(mGLData.IsCreatedSyncObject)
-   {
-       if(mGLData.mSyncExtension.IsSynced())
-       {
-         printf("IsSynced's true\n");
-       }
-       else
-       {
-         printf("IsSynced's false\n");
-       }
+    int w = SCREEN_WIDTH;
+    int h = SCREEN_HEIGHT;
+    static double hue = 0.0;
 
-       mGLData.mSyncExtension.DestroySyncObject();
-       mGLData.IsCreatedSyncObject = false;
-   }
+    g_angle += 1.0f;
 
-   Draw_offscreen();
+    if (g_angle >= 360.0f) {
+        g_angle -= 360.0f;
+    }
 
-   Draw_onscreen();
+    g_angle = (g_angle + 1) % (360 * 3);
 
-   if(mGLData.IsCreatedSyncObject ==  false)
-   {
-       if( !mGLData.mSyncExtension.CreateSyncObject() )
-       {
-         printf("Fail to create sync object\n");
-       }
-       else
-       {
-         printf("success to create sync object\n");
-         mGLData.IsCreatedSyncObject = true;
-       }
-   }
+    float r = (1.0f + sin(hue - 2.0 * PI / 3.0)) / 3.0f;
+    float g = (1.0f + sin(hue)) / 3.0f;
+    float b = (1.0f + sin(hue + 2.0 * PI / 3.0)) / 3.0f;
 
+    hue += 0.03;
 
-   mGLData.mCount++;
+    glUseProgram(program);
+    glUniform4f(idxfogColor, r, g, b, 1.0f);
+    glViewport(0, 0, w, h);
+    glClearColor(r, g, b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    init_matrix((float*)matModelview);
+    Translate(matModelview, 0.0f, 0.0, -6.0);
+
+    Rotate(matModelview, -(float)g_angle / 3.0f, 0.0, 0.0, 1.0);
+    Rotate(matModelview, -g_angle, 0.0, 1.0, 0.0);
+
+    multiply_matrix((float*)view, (float*)matPerspective, (float*)matModelview);
+    glUniformMatrix4fv(idxModelVeiw, 1, GL_FALSE, (GLfloat*)(float*)matModelview);
+    glUniformMatrix4fv(idxMVP, 1, GL_FALSE, (GLfloat*)view);
+    glEnable( GL_TEXTURE_2D );
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, nativeTexture.renderedTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glBindBuffer(GL_ARRAY_BUFFER, idxVBO_BOX);
+    glVertexAttribPointer(idxVPosition, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+    glEnableVertexAttribArray(idxVPosition);
+    glBindBuffer(GL_ARRAY_BUFFER, idxTBO);
+    glVertexAttribPointer(idxVTexCoord, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
+    glEnableVertexAttribArray(idxVTexCoord);
+
+    for(int i = 0; i < 6 ; i++) {
+        glDrawArrays(GL_TRIANGLE_STRIP, 4 * i, 4);
+    }
+
+    glDisableVertexAttribArray(idxVPosition);
+    glDisableVertexAttribArray(idxVTexCoord);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    mGLData.mCount++;
+    if (mGLData.mCount%100 == 0) {
+        updateNativeTexture(&nativeTexture, 1, 3, dali_str);
+    }
+    if (mGLData.mCount%200 == 0) {
+        updateNativeTexture(&nativeTexture, 1, 3, tizen_str);
+    }
 
    return 1;
-
 }
 
 
 // delete callback gets called when glview is deleted
 API void terminate_gl()
 {
+    tbm_surface_destroy (nativeTexture.buffer);
+    mGLData.mImageExtension.DestroyImageKHR();
+
+    glDeleteShader(vtx_shader);
+    glDeleteShader(fgmt_shader);
+    glDeleteProgram(program);
+    glDeleteBuffers(1, &idxTBO);
+    glDeleteBuffers(1, &idxVBO_BOX);
+    glDeleteTextures(1, &nativeTexture.renderedTexture);
 
 }
 
@@ -1052,10 +1498,7 @@ API void update_touch_position(int x, int y)
 
 API void update_window_size(int w, int h)
 {
-#if 0
-  mGLData.width = w;
-  mGLData.height = h;
-#endif
+
 }
 
 API void update_window_rotation_angle(int angle)
@@ -1219,3 +1662,4 @@ int DALI_EXPORT_API main( int argc, char **argv )
   application.MainLoop();
   return 0;
 }
+#endif
