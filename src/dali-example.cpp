@@ -17,6 +17,7 @@
 
 // EXTERNAL INCLUDES
 #include <dali-toolkit/dali-toolkit.h>
+#include <dali-toolkit/devel-api/controls/video-view/video-view-devel.h>
 #include <dali/devel-api/adaptor-framework/window-devel.h>
 #include <dali/public-api/adaptor-framework/window.h>
 #include <dali/integration-api/debug.h>
@@ -80,7 +81,7 @@ private:
     mVideoView1.SetProperty( VideoView::Property::LOOPING, true );
     mVideoView1.SetProperty( VideoView::Property::MUTED, false );
     mVideoView1.SetProperty( VideoView::Property::VIDEO, PLAY_FILE2 );
-    mVideoView1.SetProperty( Toolkit::VideoView::Property::UNDERLAY, true );
+    mVideoView1.SetProperty( Toolkit::VideoView::Property::UNDERLAY, false );
     mVideoView1.Play();
 #else
     TextLabel textLabel = TextLabel::New("Hello World");
@@ -153,18 +154,18 @@ private:
     {
       if(touched)
       {
-        Vector2 touchedPosition = touch.GetScreenPosition(0);
-        float deltaX = touchedPosition.x - mTouchedPosition.x;
-        float deltaY = touchedPosition.y - mTouchedPosition.y;
+        Vector2 diff = touch.GetScreenPosition(0) - mTouchedPosition;
         //DALI_LOG_ERROR("Touch move, old: %f, %f, new: %f, %f\n",mTouchedPosition.x, mTouchedPosition.y, touchedPosition.x, touchedPosition.y );
-        //DALI_LOG_ERROR("Touch move, delta: %f, %f\n",deltaX, deltaY);
+        //DALI_LOG_ERROR("Touch move, delta: %f, %f\n",diff.x, diff.y);
 
-        if((fabs(deltaX) > 5.0) || (fabs(deltaY) > 5.0))
+        if((fabs(diff.x) > 5.0) || (fabs(diff.y) > 5.0))
         {
-          Dali::Window::WindowPosition position = Dali::Window::WindowPosition(mCurrentPosition.GetX() + deltaX, mCurrentPosition.GetY() + deltaY);
+          Dali::Window::WindowPosition position = Dali::Window::WindowPosition(mCurrentPosition.GetX() + diff.x, mCurrentPosition.GetY() + diff.y);
           //DALI_LOG_ERROR("Touch move, current[%f,%f], new[%d,%d]\n",mCurrentPosition.GetX(), mCurrentPosition.GetY(), position.GetX(), position.GetY());
           window.SetPosition(position);
           mCurrentPosition = window.GetPosition();
+          mTouchedPosition = touch.GetScreenPosition(0);
+
         }
       }
     }
