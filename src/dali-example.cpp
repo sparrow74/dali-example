@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Samsung Electronics Co., Ltd.
+ * Copyright (c) 2019 Samsung Electronics Co., Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,114 +15,174 @@
  *
  */
 
-// EXTERNAL INCLUDES
 #include <dali-toolkit/dali-toolkit.h>
+#include <dali/integration-api/scene.h>
 #include <dali/devel-api/adaptor-framework/window-devel.h>
+#include <dali/integration-api/debug.h>
+#include <iostream>
 
 using namespace Dali;
 using namespace Dali::Toolkit;
 
-namespace
-{
-const char * const STYLE_PATH( DEMO_STYLE_DIR "dali-example.json" ); ///< The style used for this example
-const char * const BACKGROUND_STYLE_NAME( "Background" ); ///< The name of the Background style
-const char * const IMAGE_STYLE_NAME( "StyledImage" ); ///< The name of the styled image style
-const char * const IMAGE_PATH( DEMO_IMAGE_DIR "silhouette.jpg" ); ///< Image to show
-} // unnamed namespace
-
-/// Basic DALi Example to use for debugging small programs on target
-class Example : public ConnectionTracker
+// This example shows how to create and display Hello World! using a simple TextActor
+//
+class HelloWorldController : public ConnectionTracker
 {
 public:
 
-  ///< Constructor
-  Example( Application& application )
-  : mApplication( application )
+  HelloWorldController( Application& application )
+  : mApplication( application ),
+    rotation_flag( 0 ),
+    rotation_count( 0 ),
+    rot( 0 )
   {
-    mApplication.InitSignal().Connect( this, &Example::Create );
+    // Connect to the Application's Init signal
+    mApplication.InitSignal().Connect( this, &HelloWorldController::Create );
   }
 
-  ~Example() = default;
+  ~HelloWorldController() = default;
 
-private:
-
-  ///< Called to initialise the application UI
+  // The Init signal is received once (only) during the Application lifetime
   void Create( Application& application )
   {
-    // Get a handle to the main window & respond to key events
+    // Get a handle to the window and set the background colour
     Window window = application.GetWindow();
-    window.KeyEventSignal().Connect( this, &Example::OnKeyEvent );
+    window.SetType(WindowType::IME);
+    window.SetBackgroundColor( Color::WHITE );
 
-    window.SetType(WindowType::UTILITY);
-    DevelWindow::SetPositionSize(window, PositionSize(0, 0, 480, 800));
+#if 0
+    TextLabel textLabel = TextLabel::New("Hello World");
+    textLabel.SetProperty(Actor::Property::ANCHOR_POINT, AnchorPoint::TOP_LEFT);
+    textLabel.SetProperty(Dali::Actor::Property::NAME, "helloWorldLabel");
+    window.Add(textLabel);
+#else
+    // Add a text label to the window
+    TextLabel textLabel = TextLabel::New( "Hello World" );
+    textLabel.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::CENTER );
+    textLabel.SetProperty( Actor::Property::PARENT_ORIGIN, ParentOrigin::CENTER );
+    textLabel.SetProperty( Actor::Property::NAME, "helloWorldLabel" );
+    textLabel.SetBackgroundColor( Color::RED );
+    window.Add( textLabel );
 
-    // Create the background using the style sheet
-    Control control = Control::New();
-    control.SetStyleName( BACKGROUND_STYLE_NAME );
-    window.Add( control );
+    // Respond to key events
+    window.KeyEventSignal().Connect( this, &HelloWorldController::OnKeyEvent );
 
-    // Create an ImageView and add it to the window
-    ImageView image = ImageView::New( IMAGE_PATH );
-    image.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::CENTER );
-    image.SetProperty( Actor::Property::PARENT_ORIGIN, Vector3( 0.5f,  0.25f, 0.5f ) );
-    window.Add( image );
+    // Create a clipping control and add a child to it
+    mClipControl = Control::New();
+    mClipControl.SetProperty( Actor::Property::SIZE, Vector2( 250.0f, 100.0f ) );
+    mClipControl.SetProperty( Actor::Property::PARENT_ORIGIN, Vector3(  0.75f, 0.75f, 0.5f)  );
+    mClipControl.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::CENTER  );
+    mClipControl.SetBackgroundColor( Color::BLUE );
+    window.Add( mClipControl );
 
-    // Create an ImageView with properties set from the style sheet
-    ImageView styledImage = ImageView::New();
-    styledImage.SetStyleName( IMAGE_STYLE_NAME );
-    window.Add( styledImage );
+    auto child = Control::New();
+    child.SetProperty( Actor::Property::SIZE, Vector2( 100.0f, 250.0f  ) );
+    child.SetProperty( Actor::Property::PARENT_ORIGIN, AnchorPoint::CENTER  );
+    child.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::CENTER  );
+    child.SetBackgroundColor( Color::GREEN );
+    mClipControl.Add( child );
+#endif
+    Dali::Window winHandle = application.GetWindow();
+    winHandle.AddAvailableOrientation( Dali::WindowOrientation::PORTRAIT );
+    winHandle.AddAvailableOrientation( Dali::WindowOrientation::LANDSCAPE );
+    winHandle.AddAvailableOrientation( Dali::WindowOrientation::PORTRAIT_INVERSE );
+    winHandle.AddAvailableOrientation( Dali::WindowOrientation::LANDSCAPE_INVERSE );
 
-    window.AddAvailableOrientation(Dali::WindowOrientation::PORTRAIT);
-    window.AddAvailableOrientation(Dali::WindowOrientation::LANDSCAPE);
-    window.AddAvailableOrientation(Dali::WindowOrientation::PORTRAIT_INVERSE);
-    window.AddAvailableOrientation(Dali::WindowOrientation::LANDSCAPE_INVERSE);
+    DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 720, 442 ));
 
-    window.GetRootLayer().TouchedSignal().Connect(this, &Example::OnTouch);
+    DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT, PositionSize(0, 0, 720, 442));
+    DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE, PositionSize(0, 0, 318, 1280));
+    DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 442));
+    DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 318, 1280));
 
-    mTempTimer = Timer::New(7000.0f);
-    mTempTimer.TickSignal().Connect(this, &Example::smallTick);
+//      DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 720, 300 ));
+
+//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT, PositionSize(0, 0, 720, 300));
+//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE, PositionSize(420, 0, 300, 1280));
+//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 300));
+//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 1280, 300));
+
+    winHandle.Show();
   }
 
-  bool OnTouch(Actor actor, const TouchEvent& touch)
+  bool OnTimerTick()
   {
-    // quit the application
-    if(touch.GetState(0) == PointState::UP)
-    {
-      Window window = mApplication.GetWindow();
-      window.Hide();
-      mTempTimer.Start();
-    }
-    return true;
-  }
-
-  bool smallTick()
-  {
-    Window window = mApplication.GetWindow();
-    window.Show();
+    DALI_LOG_ERROR("OnTimerTick()!!! time out\n");
+    Dali::Window winHandle = mApplication.GetWindow();
+    winHandle.Show();
     return false;
   }
 
-  ///< Called when a key is pressed, we'll use this to quit
   void OnKeyEvent( const KeyEvent& event )
   {
-    if( event.GetState() == KeyEvent::DOWN )
-    {
-      if ( IsKey( event, Dali::DALI_KEY_ESCAPE ) || IsKey( event, Dali::DALI_KEY_BACK ) )
+#if 1
+      if( event.GetState() == KeyEvent::DOWN )
       {
-        mApplication.Quit();
+        std::cout << "KeyName: " << event.GetKeyName() << std::endl;
+        if (event.GetKeyName()  == "1")
+        {
+            // Toggle the clipping mode on mClippingControl if any other actor by pressing any key
+            ClippingMode::Type currentMode;
+            mClipControl.GetProperty( Actor::Property::CLIPPING_MODE ).Get( currentMode );
+            mClipControl.SetProperty(
+                Actor::Property::CLIPPING_MODE,
+                ( ( currentMode == ClippingMode::DISABLED ) ? ClippingMode::CLIP_TO_BOUNDING_BOX : ClippingMode::DISABLED ) );
+        }
+        else if (event.GetKeyName()  == "2")
+        {
+            Dali::Window winHandle = mApplication.GetWindow();
+            mTimer = Timer::New( 5000 );
+            mTimer.TickSignal().Connect(this, &HelloWorldController::OnTimerTick);
+            mTimer.Start();
+            winHandle.Hide();
+        }
+        else if (event.GetKeyName()  == "3")
+        {
+            mSecondWindow = Window::New(PositionSize(0, 0, 1920, 1080), "", false);
+#if 0
+            mSecondWindow.SetTransparency( true );
+            mSecondWindow.SetBackgroundColor( Vector4( 0.9, 0.3, 0.3, 0.5) );
+
+            Dali::Window::WindowPosition secondWindowPosition = Dali::Window::WindowPosition( 0, 0 );
+            mSecondWindow.SetPosition(secondWindowPosition);
+
+            mTextLabel2 = TextLabel::New( "Second window" );
+            mTextLabel2.SetProperty( Actor::Property::ANCHOR_POINT, AnchorPoint::TOP_LEFT );
+            mTextLabel2.SetProperty( Actor::Property::NAME, "Second Window");
+
+            mSecondWindow.Add( mTextLabel2 );
+
+            mSecondWindow.AddAvailableOrientation( Dali::Window::LANDSCAPE );
+            mSecondWindow.AddAvailableOrientation( Dali::Window::PORTRAIT );
+            mSecondWindow.AddAvailableOrientation( Dali::Window::LANDSCAPE_INVERSE );
+            mSecondWindow.AddAvailableOrientation( Dali::Window::PORTRAIT_INVERSE );
+
+            //mSecondWindow.Hide();
+            mSecondWindow.Show();
+#endif
+            mSecondWindow.Hide();
+            //mClipControl.SetProperty( Actor::Property::PARENT_ORIGIN, Vector3(  0.25f, 0.25f, 0.5f)  );
+        }
       }
-    }
+#endif
   }
 
 private:
   Application&  mApplication;
-  Timer mTempTimer;
+  Control mClipControl;
+  int rotation_flag;
+  int rotation_count;
+  int rot;
+  Timer mTimer;
+  TextLabel mTextLabel2;
+
+  Dali::Window mSecondWindow;
 };
 
 int DALI_EXPORT_API main( int argc, char **argv )
 {
-  Application application = Application::New( &argc, &argv, STYLE_PATH );
-  Example test( application );
+  Application application = Application::New( &argc, &argv );
+  HelloWorldController test( application );
   application.MainLoop();
   return 0;
 }
