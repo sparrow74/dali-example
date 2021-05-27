@@ -95,13 +95,6 @@ public:
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 442));
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 318, 1280));
 
-//      DevelWindow::SetPositionSize( window, PositionSize( 0, 0, 720, 300 ));
-
-//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT, PositionSize(0, 0, 720, 300));
-//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE, PositionSize(420, 0, 300, 1280));
-//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 300));
-//      DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 1280, 300));
-
     winHandle.Show();
   }
 
