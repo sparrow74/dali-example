@@ -36,6 +36,8 @@ SET(DEMO_IMAGE_DIR ${IMAGES_DIR})
 SET(DEMO_STYLE_DIR "${STYLE_DIR}")
 SET(DEMO_LANG "${LANG}")
 
+ADD_DEFINITIONS("-DEXPORTED=__attribute__((visibility(\"default\")))")
+
 # Image Resources
 INSTALL(DIRECTORY ${LOCAL_IMAGES_DIR} DESTINATION ${APP_DATA_RES_DIR})
 
@@ -56,7 +58,9 @@ SET(PKG_LIST dali2-core
              dali2-adaptor
              dali2-toolkit
              glesv2
-             libtbm)
+             libtbm
+             capi-ui-inputmethod
+             dlog)
 
 INCLUDE(FindPkgConfig)
 PKG_CHECK_MODULES(REQUIRED_PKGS REQUIRED ${PKG_LIST})

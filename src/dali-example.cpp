@@ -20,6 +20,8 @@
 #include <dali/devel-api/adaptor-framework/window-devel.h>
 #include <dali/integration-api/debug.h>
 #include <iostream>
+#include <inputmethod.h>
+#include <inputmethod_internal.h>
 
 using namespace Dali;
 using namespace Dali::Toolkit;
@@ -95,7 +97,7 @@ public:
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 442));
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 318, 1280));
 
-    winHandle.Show();
+    //winHandle.Show();
   }
 
   bool OnTimerTick()
@@ -172,10 +174,57 @@ private:
   Dali::Window mSecondWindow;
 };
 
+static int _argc;
+static char **_argv;
+static Application application;
+
+static void ime_app_create_cb(void *user_data)
+{
+}
+
+static void ime_app_exit_cb(void *user_data)
+{
+}
+
+static void ime_app_show_cb(int ic, ime_context_h ime_ctx, void *user_data)
+{
+}
+
+static void ime_app_hide_cb(int ic, void *user_data)
+{
+}
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+EXPORTED void ime_app_main(int argc, char **argv)
+{
+    ime_callback_s basic_callback = {
+        ime_app_create_cb,
+        ime_app_exit_cb,
+        ime_app_show_cb,
+        ime_app_hide_cb
+    };
+
+    ime_set_dotnet_flag(TRUE);
+    ime_set_window_creation_defer_flag(TRUE);
+    ime_run(&basic_callback, NULL);
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+
 int DALI_EXPORT_API main( int argc, char **argv )
 {
-  Application application = Application::New( &argc, &argv );
-  HelloWorldController test( application );
-  application.MainLoop();
-  return 0;
+    _argc = argc;
+    _argv = argv;
+    application = Application::New( &_argc, &_argv );
+    HelloWorldController test( application );
+    application.MainLoop();
+    ime_app_main(argc, argv);
+
+    return 0;
 }

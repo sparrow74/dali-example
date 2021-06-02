@@ -1,0 +1,138 @@
+diff --git a/build/tizen/CMakeLists.txt b/build/tizen/CMakeLists.txt
+index cbc8633..c3a9b78 100644
+--- a/build/tizen/CMakeLists.txt
++++ b/build/tizen/CMakeLists.txt
+@@ -36,6 +36,8 @@ SET(DEMO_IMAGE_DIR ${IMAGES_DIR})
+ SET(DEMO_STYLE_DIR "${STYLE_DIR}")
+ SET(DEMO_LANG "${LANG}")
+ 
++ADD_DEFINITIONS("-DEXPORTED=__attribute__((visibility(\"default\")))")
++
+ # Image Resources
+ INSTALL(DIRECTORY ${LOCAL_IMAGES_DIR} DESTINATION ${APP_DATA_RES_DIR})
+ 
+@@ -56,7 +58,9 @@ SET(PKG_LIST dali2-core
+              dali2-adaptor
+              dali2-toolkit
+              glesv2
+-             libtbm)
++             libtbm
++             capi-ui-inputmethod
++             dlog)
+ 
+ INCLUDE(FindPkgConfig)
+ PKG_CHECK_MODULES(REQUIRED_PKGS REQUIRED ${PKG_LIST})
+diff --git a/com.samsung.dali-example.xml b/com.samsung.dali-example.xml
+index d8ba0e5..99d564a 100644
+--- a/com.samsung.dali-example.xml
++++ b/com.samsung.dali-example.xml
+@@ -5,12 +5,15 @@
+ 	<author email="adeel.kazmi@samsung.com" href="www.samsung.com">Adeel Kazmi</author>
+ 	<description>DALi Example</description>
+ 
+-	<ui-application appid="com.samsung.dali-example" exec="/usr/apps/com.samsung.dali-example/bin/dali-example" nodisplay="false" multiple="false" type="c++app" taskmanage="true">
++	<ui-application appid="com.samsung.dali-example" exec="/usr/apps/com.samsung.dali-example/bin/dali-example" nodisplay="true" multiple="false" type="c++app" taskmanage="false">
++		<metadata key="http://tizen.org/metadata/prefer_dotnet_aot" value="true" />
++		<category name="http://tizen.org/category/ime"/>
+ 		<icon>/usr/share/icons/com.samsung.dali-example.png</icon>
+ 		<label>DALi Example</label>
+ 	</ui-application>
+ 
+ 	<privileges>
++		<privilege>http://tizen.org/privilege/ime</privilege>
+ 		<privilege>http://tizen.org/privilege/mediastorage</privilege>
+ 		<privilege>http://tizen.org/privilege/externalstorage</privilege>
+ 		<privilege>http://tizen.org/privilege/externalstorage.appdata</privilege>
+diff --git a/packaging/com.samsung.dali-example.spec b/packaging/com.samsung.dali-example.spec
+index 583e801..b4f1ab8 100755
+--- a/packaging/com.samsung.dali-example.spec
++++ b/packaging/com.samsung.dali-example.spec
+@@ -20,6 +20,8 @@ BuildRequires:  pkgconfig(dali2-toolkit)
+ BuildRequires:  pkgconfig(libtzplatform-config)
+ BuildRequires:  pkgconfig(glesv2)
+ BuildRequires:  pkgconfig(libtbm)
++BuildRequires:  pkgconfig(capi-ui-inputmethod)
++BuildRequires:  pkgconfig(dlog)
+ 
+ %description
+ A simple DALi example with resources and a style.
+diff --git a/src/dali-example.cpp b/src/dali-example.cpp
+index bdc47e6..5f63ada 100644
+--- a/src/dali-example.cpp
++++ b/src/dali-example.cpp
+@@ -20,6 +20,11 @@
+ #include <dali/devel-api/adaptor-framework/window-devel.h>
+ #include <dali/integration-api/debug.h>
+ #include <iostream>
++#include <inputmethod.h>
++#include <dlog.h>
++
++#undef LOG_TAG
++#define LOG_TAG "DALI_EXAMPLE"
+ 
+ using namespace Dali;
+ using namespace Dali::Toolkit;
+@@ -172,10 +177,59 @@ private:
+   Dali::Window mSecondWindow;
+ };
+ 
++static int _argc;
++static char **_argv;
++static Application application;
++
++static void ime_app_create_cb(void *user_data)
++{
++    LOGD("");
++    application = Application::New( &_argc, &_argv );
++
++}
++
++static void ime_app_exit_cb(void *user_data)
++{
++    LOGD("");
++}
++
++static void ime_app_show_cb(int ic, ime_context_h ime_ctx, void *user_data)
++{
++    LOGD("");
++    HelloWorldController test( application );
++}
++
++static void ime_app_hide_cb(int ic, void *user_data)
++{
++    LOGD("");
++}
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++EXPORTED void ime_app_main(int argc, char **argv)
++{
++    ime_callback_s basic_callback = {
++        ime_app_create_cb,
++        ime_app_exit_cb,
++        ime_app_show_cb,
++        ime_app_hide_cb
++    };
++
++    ime_run(&basic_callback, NULL);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++
+ int DALI_EXPORT_API main( int argc, char **argv )
+ {
+-  Application application = Application::New( &argc, &argv );
+-  HelloWorldController test( application );
+-  application.MainLoop();
+-  return 0;
++    _argc = argc;
++    _argv = argv;
++    ime_app_main(argc, argv);
++
++    return 0;
+ }

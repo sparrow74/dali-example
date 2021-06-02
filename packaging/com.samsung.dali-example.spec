@@ -20,6 +20,8 @@ BuildRequires:  pkgconfig(dali2-toolkit)
 BuildRequires:  pkgconfig(libtzplatform-config)
 BuildRequires:  pkgconfig(glesv2)
 BuildRequires:  pkgconfig(libtbm)
+BuildRequires:  pkgconfig(capi-ui-inputmethod)
+BuildRequires:  pkgconfig(dlog)
 
 %description
 A simple DALi example with resources and a style.

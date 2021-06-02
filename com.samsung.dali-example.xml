@@ -5,12 +5,15 @@
 	<author email="adeel.kazmi@samsung.com" href="www.samsung.com">Adeel Kazmi</author>
 	<description>DALi Example</description>
 
-	<ui-application appid="com.samsung.dali-example" exec="/usr/apps/com.samsung.dali-example/bin/dali-example" nodisplay="false" multiple="false" type="c++app" taskmanage="true">
+	<ui-application appid="com.samsung.dali-example" exec="/usr/apps/com.samsung.dali-example/bin/dali-example" nodisplay="true" multiple="false" type="c++app" taskmanage="false">
+		<metadata key="http://tizen.org/metadata/prefer_dotnet_aot" value="true" />
+		<category name="http://tizen.org/category/ime"/>
 		<icon>/usr/share/icons/com.samsung.dali-example.png</icon>
 		<label>DALi Example</label>
 	</ui-application>
 
 	<privileges>
+		<privilege>http://tizen.org/privilege/ime</privilege>
 		<privilege>http://tizen.org/privilege/mediastorage</privilege>
 		<privilege>http://tizen.org/privilege/externalstorage</privilege>
 		<privilege>http://tizen.org/privilege/externalstorage.appdata</privilege>
