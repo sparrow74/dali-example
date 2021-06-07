@@ -17,7 +17,10 @@
 
 #include <dali-toolkit/dali-toolkit.h>
 #include <dali/integration-api/scene.h>
+#include <dali/public-api/adaptor-framework/application.h>
+#include <dali/public-api/adaptor-framework/window.h>
 #include <dali/devel-api/adaptor-framework/window-devel.h>
+#include <dali/devel-api/adaptor-framework/application-devel.h>
 #include <dali/integration-api/debug.h>
 #include <iostream>
 #include <inputmethod.h>
@@ -49,7 +52,6 @@ public:
   {
     // Get a handle to the window and set the background colour
     Window window = application.GetWindow();
-    window.SetType(WindowType::IME);
     window.SetBackgroundColor( Color::WHITE );
 
 #if 0
@@ -97,7 +99,7 @@ public:
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::PORTRAIT_INVERSE, PositionSize(0, 0, 720, 442));
     DevelWindow::SetPartialWindowOrientation(winHandle, Dali::WindowOrientation::LANDSCAPE_INVERSE, PositionSize(0, 0, 318, 1280));
 
-    //winHandle.Show();
+    winHandle.Show();
   }
 
   bool OnTimerTick()
@@ -221,7 +223,8 @@ int DALI_EXPORT_API main( int argc, char **argv )
 {
     _argc = argc;
     _argv = argv;
-    application = Application::New( &_argc, &_argv );
+    //application = Application::New( &_argc, &_argv );
+    application = DevelApplication::New( &_argc, &_argv, "", Application::WINDOW_MODE::OPAQUE, PositionSize(), true);
     HelloWorldController test( application );
     application.MainLoop();
     ime_app_main(argc, argv);
