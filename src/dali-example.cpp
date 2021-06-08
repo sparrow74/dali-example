@@ -224,7 +224,7 @@ int DALI_EXPORT_API main( int argc, char **argv )
     _argc = argc;
     _argv = argv;
     //application = Application::New( &_argc, &_argv );
-    application = DevelApplication::New( &_argc, &_argv, "", Application::WINDOW_MODE::OPAQUE, PositionSize(), true);
+    application = DevelApplication::New( &_argc, &_argv, "", Application::WINDOW_MODE::OPAQUE, PositionSize(), WindowType::IME);
     HelloWorldController test( application );
     application.MainLoop();
     ime_app_main(argc, argv);
